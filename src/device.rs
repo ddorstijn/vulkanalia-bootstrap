@@ -3,106 +3,74 @@ use ash::vk;
 use std::borrow::Cow;
 use std::collections::HashSet;
 use std::hash::{Hash, Hasher};
-// #[derive(Debug)]
-// struct Features {
-//     robust_buffer_access: bool,
-//     full_draw_index_uint32: bool,
-//     image_cube_array: bool,
-//     independent_blend: bool,
-//     geometry_shader: bool,
-//     tessellation_shader: bool,
-//     sample_rate_shading: bool,
-//     dual_src_blend: bool,
-//     logic_op: bool,
-//     multi_draw_indirect: bool,
-//     draw_indirect_first_instance: bool,
-//     depth_clamp: bool,
-//     depth_bias_clamp: bool,
-//     fill_mode_non_solid: bool,
-//     depth_bounds: bool,
-//     wide_lines: bool,
-//     large_points: bool,
-//     alpha_to_one: bool,
-//     multi_viewport: bool,
-//     sampler_anisotropy: bool,
-//     texture_compression_etc2: bool,
-//     texture_compression_astc_ldr: bool,
-//     texture_compression_bc: bool,
-//     occlusion_query_precise: bool,
-//     pipeline_statistics_query: bool,
-//     vertex_pipeline_stores_and_atomics: bool,
-//     fragment_stores_and_atomics: bool,
-//     shader_tessellation_and_geometry_point_size: bool,
-//     shader_image_gather_extended: bool,
-//     shader_storage_image_extended_formats: bool,
-//     shader_storage_image_multisample: bool,
-//     shader_storage_image_read_without_format: bool,
-//     shader_storage_image_write_without_format: bool,
-//     shader_uniform_buffer_array_dynamic_indexing: bool,
-//     shader_sampled_image_array_dynamic_indexing: bool,
-//     shader_storage_buffer_array_dynamic_indexing: bool,
-//     shader_storage_image_array_dynamic_indexing: bool,
-//     shader_clip_distance: bool,
-//     shader_cull_distance: bool,
-//     shader_float64: bool,
-//     shader_int64: bool,
-//     shader_int16: bool,
-//     shader_resource_residency: bool,
-//     shader_resource_min_lod: bool,
-//     sparse_binding: bool,
-//     sparse_residency_buffer: bool,
-//     sparse_residency_image2_d: bool,
-//     sparse_residency_image3_d: bool,
-//     sparse_residency2_samples: bool,
-//     sparse_residency4_samples: bool,
-//     sparse_residency8_samples: bool,
-//     sparse_residency16_samples: bool,
-//     sparse_residency_aliased: bool,
-//     variable_multisample_rate: bool,
-//     inherited_queries: bool,
-// }
-//
-// impl From<vk::PhysicalDeviceFeatures> for Features {
-//     fn from(features: vk::PhysicalDeviceFeatures) -> Self {
-//         Self {
-//             robust_buffer_access: features.robust_buffer_access == vk::TRUE,
-//             full_draw_index_uint32: features.full_draw_index_uint32 == vk::TRUE,
-//             image_cube_array: features.image_cube_array == vk::TRUE,
-//             independent_blend: features.independent_blend == vk::TRUE,
-//             geometry_shader: features.geometry_shader == vk::TRUE,
-//             tessellation_shader: features.tessellation_shader == vk::TRUE,
-//             sample_rate_shading: features.sample_rate_shading == vk::TRUE,
-//             dual_src_blend: features.dual_src_blend == vk::TRUE,
-//             logic_op: features.logic_op == vk::TRUE,
-//             multi_draw_indirect: features.logic_op == vk::TRUE,
-//             draw_indirect_first_instance: features.draw_indirect_first_instance == vk::TRUE,
-//             depth_clamp: features.depth_clamp == vk::TRUE,
-//             depth_bias_clamp: features.depth_bias_clamp == vk::TRUE,
-//             fill_mode_non_solid: features.fill_mode_non_solid == vk::TRUE,
-//             depth_bounds: features.depth_bounds == vk::TRUE,
-//             wide_lines: features.wide_lines == vk::TRUE,
-//             large_points: features.large_points == vk::TRUE,
-//             alpha_to_one: features.alpha_to_one == vk::TRUE,
-//             multi_viewport: features.multi_viewport == vk::TRUE,
-//             sampler_anisotropy: features.sampler_anisotropy == vk::TRUE,
-//             texture_compression_etc2: features.texture_compression_etc2 == vk::TRUE,
-//             texture_compression_astc_ldr: features.texture_compression_astc_ldr == vk::TRUE,
-//             texture_compression_bc: features.texture_compression_bc == vk::TRUE,
-//             occlusion_query_precise: features.occlusion_query_precise == vk::TRUE,
-//             pipeline_statistics_query: features.pipeline_statistics_query == vk::TRUE,
-//             vertex_pipeline_stores_and_atomics: features.vertex_pipeline_stores_and_atomics == vk::TRUE,
-//             fragment_stores_and_atomics: features.fragment_stores_and_atomics == vk::TRUE,
-//             shader_tessellation_and_geometry_point_size: features.shader_tessellation_and_geometry_point_size == vk::TRUE,
-//             shader_image_gather_extended: features.shader_image_gather_extended == vk::TRUE,
-//             shader_storage_image_extended_formats: features.shader_storage_image_extended_formats == vk::TRUE,
-//             shader_storage_image_multisample: features.shader_storage_image_multisample == vk::TRUE,
-//             shader_storage_image_read_without_format: features.shader_storage_image_read_without_format == vk::TRUE,
-//             shader_storage_image_write_without_format: features.shader_storage_image_write_without_format == vk::TRUE,
-//             shader_uniform_buffer_array_dynamic_indexing: features.shader_uniform_buffer_array_dynamic_indexing == vk::TRUE,
-//
-//         }
-//     }
-// }
+
+pub fn supports_features(supported: &vk::PhysicalDeviceFeatures, requested: &vk::PhysicalDeviceFeatures) -> bool {
+    macro_rules! check_feature {
+        ($feature: ident) => {
+            if requested.$feature == vk::TRUE && supported.$feature == vk::FALSE {
+                return false;
+            }
+        };
+    }
+
+    check_feature!(robust_buffer_access);
+    check_feature!(full_draw_index_uint32);
+    check_feature!(image_cube_array);
+    check_feature!(independent_blend);
+    check_feature!(geometry_shader);
+    check_feature!(tessellation_shader);
+    check_feature!(sample_rate_shading);
+    check_feature!(dual_src_blend);
+    check_feature!(logic_op);
+    check_feature!(multi_draw_indirect);
+    check_feature!(draw_indirect_first_instance);
+    check_feature!(depth_clamp);
+    check_feature!(depth_bias_clamp);
+    check_feature!(fill_mode_non_solid);
+    check_feature!(depth_bounds);
+    check_feature!(wide_lines);
+    check_feature!(large_points);
+    check_feature!(alpha_to_one);
+    check_feature!(multi_viewport);
+    check_feature!(sampler_anisotropy);
+    check_feature!(texture_compression_etc2);
+    check_feature!(texture_compression_astc_ldr);
+    check_feature!(texture_compression_bc);
+    check_feature!(occlusion_query_precise);
+    check_feature!(pipeline_statistics_query);
+    check_feature!(vertex_pipeline_stores_and_atomics);
+    check_feature!(fragment_stores_and_atomics);
+    check_feature!(shader_tessellation_and_geometry_point_size);
+    check_feature!(shader_image_gather_extended);
+    check_feature!(shader_storage_image_extended_formats);
+    check_feature!(shader_storage_image_multisample);
+    check_feature!(shader_storage_image_read_without_format);
+    check_feature!(shader_storage_image_write_without_format);
+    check_feature!(shader_uniform_buffer_array_dynamic_indexing);
+    check_feature!(shader_sampled_image_array_dynamic_indexing);
+    check_feature!(shader_storage_buffer_array_dynamic_indexing);
+    check_feature!(shader_storage_image_array_dynamic_indexing);
+    check_feature!(shader_clip_distance);
+    check_feature!(shader_cull_distance);
+    check_feature!(shader_float64);
+    check_feature!(shader_int64);
+    check_feature!(shader_int16);
+    check_feature!(shader_resource_residency);
+    check_feature!(shader_resource_min_lod);
+    check_feature!(sparse_binding);
+    check_feature!(sparse_residency_buffer);
+    check_feature!(sparse_residency_image2_d);
+    check_feature!(sparse_residency_image3_d);
+    check_feature!(sparse_residency2_samples);
+    check_feature!(sparse_residency4_samples);
+    check_feature!(sparse_residency8_samples);
+    check_feature!(sparse_residency16_samples);
+    check_feature!(sparse_residency_aliased);
+    check_feature!(variable_multisample_rate);
+    check_feature!(inherited_queries);
+
+    true
+}
 
 #[repr(u8)]
 #[derive(Default, Debug, Eq, PartialEq, Ord, PartialOrd)]
@@ -319,10 +287,16 @@ impl<'a> PhysicalDeviceSelector<'a> {
     }
 
     fn is_device_suitable(&self, device: &PhysicalDevice) -> Suitable {
-        let mut suitable = Suitable::Yes;
+        let suitable = Suitable::Yes;
         let criteria = &self.selection_criteria;
 
-        if Cow::Borrowed(&criteria.name) != device.properties.device_name_as_c_str().expect("device name should be correct cstr").to_string_lossy() {
+        if Cow::Borrowed(&criteria.name)
+            != device
+                .properties
+                .device_name_as_c_str()
+                .expect("device name should be correct cstr")
+                .to_string_lossy()
+        {
             return Suitable::No;
         };
 
@@ -336,35 +310,33 @@ impl<'a> PhysicalDeviceSelector<'a> {
         let instance_info = &self.instance_info;
         let criteria = &self.selection_criteria;
 
-        let mut physical_device = PhysicalDevice::default();
-        physical_device.physical_device = vk_phys_device;
-        physical_device.surface = instance_info.surface;
-        physical_device.defer_surface_initialization = criteria.defer_surface_initialization;
-        physical_device.instance_version = instance_info.version;
-
-        let queue_families = unsafe {
-            instance_info
-                .instance
-                .get_physical_device_queue_family_properties(vk_phys_device)
-        };
-        physical_device.queue_families = queue_families;
-
-        physical_device.properties = unsafe {
-            instance_info
-                .instance
-                .get_physical_device_properties(vk_phys_device)
-        };
-
-        physical_device.features = unsafe {
-            instance_info
-                .instance
-                .get_physical_device_features(vk_phys_device)
-        };
-
-        physical_device.memory_properties = unsafe {
-            instance_info
-                .instance
-                .get_physical_device_memory_properties(vk_phys_device)
+        let mut physical_device = PhysicalDevice {
+            physical_device: vk_phys_device,
+            surface: instance_info.surface,
+            defer_surface_initialization: criteria.defer_surface_initialization,
+            instance_version: instance_info.version,
+            queue_families: unsafe {
+                instance_info
+                    .instance
+                    .get_physical_device_queue_family_properties(vk_phys_device)
+            },
+            properties: unsafe {
+                instance_info
+                    .instance
+                    .get_physical_device_properties(vk_phys_device)
+            },
+            features: unsafe {
+                instance_info
+                    .instance
+                    .get_physical_device_features(vk_phys_device)
+            },
+            memory_properties:  unsafe {
+                instance_info
+                    .instance
+                    .get_physical_device_memory_properties(vk_phys_device)
+            },
+            properties2_ext_enabled: instance_info.properties2_ext_enabled,
+            ..Default::default()
         };
 
         physical_device.name = physical_device
@@ -421,7 +393,7 @@ impl<'a> PhysicalDeviceSelector<'a> {
         };
 
         let fill_out_phys_dev_with_criteria = |physical_device: &mut PhysicalDevice| {
-            physical_device.features = criteria.required_features.clone();
+            physical_device.features = criteria.required_features;
             let mut portability_ext_available = false;
             let portability_name = vk::KHR_PORTABILITY_SUBSET_NAME
                 .to_string_lossy()
@@ -450,22 +422,16 @@ impl<'a> PhysicalDeviceSelector<'a> {
             return Ok(HashSet::from([device]));
         };
 
-        let physical_devices = physical_devices
-            .into_iter()
-            .filter_map(|p| {
-                let mut phys_dev = self.populate_device_details(p).ok();
+        let physical_devices = physical_devices.into_iter().filter_map(|p| {
+            let phys_dev = self.populate_device_details(p).ok();
 
-                phys_dev.map(|phys_dev| {
-
-                })
-            });
+            phys_dev.map(|phys_dev| {})
+        });
 
         todo!()
     }
 
     pub fn select(self) -> crate::Result<PhysicalDevice> {
-
-
         todo!()
     }
 }
