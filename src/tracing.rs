@@ -1,7 +1,7 @@
-use std::borrow::Cow;
-use std::ffi;
 use ash::vk;
 use ash::vk::DebugUtilsMessageSeverityFlagsEXT;
+use std::borrow::Cow;
+use std::ffi;
 
 pub unsafe extern "system" fn vulkan_tracing_callback(
     message_severity: DebugUtilsMessageSeverityFlagsEXT,
@@ -24,21 +24,21 @@ pub unsafe extern "system" fn vulkan_tracing_callback(
         } else {
             ffi::CStr::from_ptr(callback_data.p_message).to_string_lossy()
         };
-        
+
         match message_severity {
             DebugUtilsMessageSeverityFlagsEXT::VERBOSE => {
                 tracing::trace!("[{message_id_name} ({message_id_number})]: {message}");
-            },
+            }
             DebugUtilsMessageSeverityFlagsEXT::INFO => {
                 tracing::info!("[{message_id_name} ({message_id_number})]: {message}");
-            },
+            }
             DebugUtilsMessageSeverityFlagsEXT::ERROR => {
                 tracing::error!("[{message_id_name} ({message_id_number})]: {message}");
-            },
+            }
             DebugUtilsMessageSeverityFlagsEXT::WARNING => {
                 tracing::warn!("[{message_id_name} ({message_id_number})]: {message}");
-            },
-            _ => tracing::debug!("[{message_id_name} ({message_id_number})]: {message}")
+            }
+            _ => tracing::debug!("[{message_id_name} ({message_id_number})]: {message}"),
         }
 
         vk::FALSE

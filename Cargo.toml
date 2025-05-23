@@ -19,5 +19,6 @@ window-handle = [
     "raw-window-handle",
     "ash-window"
 ]
+portability = []
 
 default = ["window-handle"]

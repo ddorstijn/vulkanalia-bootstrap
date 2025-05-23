@@ -1,11 +1,11 @@
-use crate::system_info::{DEBUG_UTILS_EXT_NAME, SystemInfo, VALIDATION_LAYER_NAME};
+use crate::system_info::{SystemInfo, DEBUG_UTILS_EXT_NAME, VALIDATION_LAYER_NAME};
+use ash::ext::debug_utils;
 use ash::vk;
-use ash::vk::{AllocationCallbacks, DebugUtilsMessengerCreateInfoEXT, api_version_minor, DebugUtilsMessengerEXT};
+use ash::vk::{api_version_minor, AllocationCallbacks, DebugUtilsMessengerEXT};
 use raw_window_handle::{DisplayHandle, WindowHandle};
 use std::borrow::Cow;
 use std::ffi;
-use std::ffi::{CStr, CString, c_char, c_void};
-use ash::ext::debug_utils;
+use std::ffi::{c_char, c_void, CStr, CString};
 
 unsafe extern "system" fn vulkan_debug_callback(
     message_severity: vk::DebugUtilsMessageSeverityFlagsEXT,
@@ -71,7 +71,7 @@ pub struct InstanceBuilder<'a> {
 
     // VkInstanceCreateInfo
     layers: Vec<String>,
-    extensions: Vec<String>,
+    extensions: Vec<Cow<'a, str>>,
     flags: vk::InstanceCreateFlags,
 
     // debug callback
@@ -101,7 +101,7 @@ pub struct InstanceBuilder<'a> {
 
 impl<'a> InstanceBuilder<'a> {
     pub fn new(
-        window_display_handle: Option<(WindowHandle<'a>, DisplayHandle<'a>)>
+        window_display_handle: Option<(WindowHandle<'a>, DisplayHandle<'a>)>,
     ) -> InstanceBuilder<'a> {
         let (window_handle, display_handle) = window_display_handle.unzip();
         Self {
@@ -170,7 +170,7 @@ impl<'a> InstanceBuilder<'a> {
         self
     }
 
-    pub fn enable_extension(mut self, extension: impl Into<String>) -> Self {
+    pub fn enable_extension(mut self, extension: impl Into<Cow<'a, str>>) -> Self {
         self.extensions.push(extension.into());
         self
     }
@@ -255,7 +255,7 @@ impl<'a> InstanceBuilder<'a> {
             {
                 let version = unsafe { system_info.entry.try_enumerate_instance_version() }?;
 
-                let version = version.unwrap_or_else(|| vk::API_VERSION_1_0);
+                let version = version.unwrap_or(vk::API_VERSION_1_0);
 
                 if version < self.minimum_instance_version
                     || (self.minimum_instance_version == 0
@@ -300,7 +300,7 @@ impl<'a> InstanceBuilder<'a> {
         let extensions = self
             .extensions
             .into_iter()
-            .map(|s| CString::new(s).expect("Could not create CString"))
+            .map(|s| CString::new(s.to_string()).expect("Could not create CString"))
             .collect::<Vec<_>>();
 
         let extensions_ptrs = extensions.iter().map(|e| e.as_ptr()).collect::<Vec<_>>();
@@ -321,7 +321,13 @@ impl<'a> InstanceBuilder<'a> {
             enabled_extensions.push(vk::KHR_GET_PHYSICAL_DEVICE_PROPERTIES2_NAME.as_ptr());
         }
 
-        // TODO: add portability
+        #[cfg(feature = "portability")]
+        let portability_enumeration_support =
+            system_info.is_extension_available(vk::KHR_PORTABILITY_ENUMERATION_NAME)?;
+        #[cfg(feature = "portability")]
+        if portability_enumeration_support {
+            enabled_extensions.push(vk::KHR_PORTABILITY_ENUMERATION_NAME.as_ptr());
+        }
 
         if !self.headless_context && cfg!(feature = "window-handle") {
             if let Some(display_handle) = self.display_handle {
@@ -339,7 +345,7 @@ impl<'a> InstanceBuilder<'a> {
                     return Err(crate::InstanceError::WindowingExtensionsNotPresent(
                         windowing_extensions,
                     )
-                        .into());
+                    .into());
                 };
 
                 enabled_extensions.extend_from_slice(surface_extensions_raw);
@@ -381,12 +387,15 @@ impl<'a> InstanceBuilder<'a> {
             enabled_layers.push(VALIDATION_LAYER_NAME.as_ptr())
         };
 
-        let all_layers_supported = system_info.are_layers_available(layers.iter().map(|s| s.as_c_str()))?;
-
+        let all_layers_supported =
+            system_info.are_layers_available(layers.iter().map(|s| s.as_c_str()))?;
 
         if !all_layers_supported {
-            let enabled_layers_str = enabled_layers.iter().map(|p| unsafe { CStr::from_ptr(*p) }.to_str().unwrap().to_string()).collect::<Vec<_>>();
-            return Err(crate::InstanceError::RequestedLayersNotPresent(enabled_layers_str).into())
+            let enabled_layers_str = enabled_layers
+                .iter()
+                .map(|p| unsafe { CStr::from_ptr(*p) }.to_str().unwrap().to_string())
+                .collect::<Vec<_>>();
+            return Err(crate::InstanceError::RequestedLayersNotPresent(enabled_layers_str).into());
         };
 
         let mut messenger_create_info = vk::DebugUtilsMessengerCreateInfoEXT::default();
@@ -400,7 +409,9 @@ impl<'a> InstanceBuilder<'a> {
 
         let mut features = vk::ValidationFeaturesEXT::default();
 
-        if !self.enabled_validation_features.is_empty() || !self.disabled_validation_features.is_empty() {
+        if !self.enabled_validation_features.is_empty()
+            || !self.disabled_validation_features.is_empty()
+        {
             features = features
                 .enabled_validation_features(&self.enabled_validation_features)
                 .disabled_validation_features(&self.disabled_validation_features);
@@ -409,24 +420,39 @@ impl<'a> InstanceBuilder<'a> {
         let mut checks = vk::ValidationFlagsEXT::default();
 
         if !self.disabled_validation_checks.is_empty() {
-            checks = checks
-                .disabled_validation_checks(&self.disabled_validation_checks);
+            checks = checks.disabled_validation_checks(&self.disabled_validation_checks);
+        };
+
+        let instance_create_flags = if cfg!(feature = "portability") {
+            self.flags | vk::InstanceCreateFlags::ENUMERATE_PORTABILITY_KHR
+        } else {
+            self.flags
         };
 
         let instance_create_info = vk::InstanceCreateInfo::default()
-            .flags(self.flags)
+            .flags(instance_create_flags)
             .application_info(&app_info)
             .enabled_extension_names(&enabled_extensions)
             .enabled_layer_names(&enabled_layers);
 
-        let instance = unsafe { system_info.entry.create_instance(&instance_create_info, self.allocation_callbacks.as_ref()) }.map_err(|_| crate::InstanceError::FailedCreateInstance)?;
+        let instance = unsafe {
+            system_info
+                .entry
+                .create_instance(&instance_create_info, self.allocation_callbacks.as_ref())
+        }
+        .map_err(|_| crate::InstanceError::FailedCreateInstance)?;
 
         let mut debug_loader = None;
         let mut debug_messenger = None;
 
         if self.use_debug_messenger {
             let loader = debug_utils::Instance::new(&system_info.entry, &instance);
-            let messenger = unsafe { loader.create_debug_utils_messenger(&messenger_create_info, self.allocation_callbacks.as_ref()) }?;
+            let messenger = unsafe {
+                loader.create_debug_utils_messenger(
+                    &messenger_create_info,
+                    self.allocation_callbacks.as_ref(),
+                )
+            }?;
 
             debug_loader.replace(loader);
             debug_messenger.replace(messenger);
@@ -441,7 +467,7 @@ impl<'a> InstanceBuilder<'a> {
             properties2_ext_enabled,
             debug_loader,
             debug_messenger,
-            system_info
+            system_info,
         })
     }
 }
@@ -466,7 +492,7 @@ impl Drop for Instance<'_> {
     }
 }
 
-impl<'a> AsRef<ash::Instance> for Instance<'a> {
+impl AsRef<ash::Instance> for Instance<'_> {
     fn as_ref(&self) -> &ash::Instance {
         &self.instance
     }
@@ -474,13 +500,14 @@ impl<'a> AsRef<ash::Instance> for Instance<'a> {
 
 #[cfg(test)]
 mod tests {
-    use std::time::Duration;
-    use ash::vk;
+    use crate::device::PhysicalDeviceSelector;
     use crate::InstanceBuilder;
+    use ash::vk;
+    use std::time::Duration;
 
     #[test]
     fn compiles() {
-        use tracing_subscriber::{EnvFilter, fmt, prelude::*};
+        use tracing_subscriber::{fmt, prelude::*, EnvFilter};
 
         tracing_subscriber::registry()
             .with(fmt::layer())
@@ -491,15 +518,21 @@ mod tests {
 
         let instance = InstanceBuilder::new(None)
             .enable_validation_layers(true)
+            .headless(true)
             .app_name("test")
             .engine_name("xolaani")
             .use_default_tracing_messenger()
-            .add_debug_messenger_severity(vk::DebugUtilsMessageSeverityFlagsEXT::INFO | vk::DebugUtilsMessageSeverityFlagsEXT::VERBOSE)
-            .require_api_version(vk::make_api_version(0, 1, 3, 0))
+            .add_debug_messenger_severity(
+                vk::DebugUtilsMessageSeverityFlagsEXT::VERBOSE
+                    | vk::DebugUtilsMessageSeverityFlagsEXT::INFO,
+            )
+            .require_api_version(vk::make_api_version(0, 1, 4, 0))
             .build()
             .unwrap();
 
-        let pdevice = unsafe { instance.as_ref().enumerate_physical_devices() }.unwrap();
-
+        let device = PhysicalDeviceSelector::new(&instance, None)
+            .select_first_device_unconditionally(true)
+            .select()
+            .unwrap();
     }
 }
