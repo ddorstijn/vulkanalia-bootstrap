@@ -1,7 +1,8 @@
 use crate::Instance;
 use ash::{khr, vk};
 use std::borrow::Cow;
-use std::collections::HashSet;
+use std::cmp::Ordering;
+use std::collections::{BTreeSet, HashSet};
 use std::hash::{Hash, Hasher};
 
 fn supports_features(
@@ -145,8 +146,26 @@ fn get_present_queue_index(
     None
 }
 
+fn check_device_extension_support(
+    available_extensions: &BTreeSet<String>,
+    required_extensions: &BTreeSet<String>
+) -> BTreeSet<String> {
+    let mut extensions_to_enable = BTreeSet::new();
+
+    for avail_ext in available_extensions {
+        for req_ext in required_extensions {
+            if avail_ext == req_ext {
+                extensions_to_enable.insert(req_ext.to_string());
+                break;
+            }
+        }
+    }
+
+    extensions_to_enable
+}
+
 #[repr(u8)]
-#[derive(Default, Debug, Eq, PartialEq, Ord, PartialOrd)]
+#[derive(Default, Debug, Eq, PartialEq, Ord, PartialOrd, Copy, Clone)]
 pub enum PreferredDeviceType {
     Other = 0,
     Integrated = 1,
@@ -174,27 +193,35 @@ pub struct PhysicalDevice {
     properties: vk::PhysicalDeviceProperties,
     memory_properties: vk::PhysicalDeviceMemoryProperties,
     instance_version: u32,
-    extensions_to_enable: HashSet<String>,
-    available_extensions: HashSet<String>,
+    extensions_to_enable: BTreeSet<String>,
+    available_extensions: BTreeSet<String>,
     queue_families: Vec<vk::QueueFamilyProperties>,
     defer_surface_initialization: bool,
     properties2_ext_enabled: bool,
     suitable: Suitable,
 }
 
-impl Hash for PhysicalDevice {
-    fn hash<H: Hasher>(&self, state: &mut H) {
-        self.physical_device.hash(state);
-    }
-}
+impl Eq for PhysicalDevice {}
 
 impl PartialEq<Self> for PhysicalDevice {
     fn eq(&self, other: &Self) -> bool {
-        self.physical_device.eq(&other.physical_device)
+        self.name.eq(&other.name)
+        && self.physical_device.eq(&other.physical_device)
+        && self.suitable.eq(&other.suitable)
     }
 }
 
-impl Eq for PhysicalDevice {}
+impl PartialOrd for PhysicalDevice {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        self.suitable.partial_cmp(&other.suitable)
+    }
+}
+
+impl Ord for PhysicalDevice {
+    fn cmp(&self, other: &Self) -> Ordering {
+        self.suitable.cmp(&other.suitable)
+    }
+}
 
 impl PhysicalDevice {
     pub fn enable_extension_if_present(&mut self, extension: impl Into<String>) -> bool {
@@ -212,8 +239,8 @@ impl PhysicalDevice {
         extensions: I,
     ) -> bool {
         let extensions = extensions.into_iter().map(Into::into);
-        let extensions = HashSet::from_iter(extensions);
-        let intersection: HashSet<_> = self
+        let extensions = BTreeSet::from_iter(extensions);
+        let intersection: BTreeSet<_> = self
             .available_extensions
             .intersection(&extensions)
             .cloned()
@@ -248,7 +275,7 @@ struct SelectionCriteria<'a> {
     require_separate_transfer_queue: bool,
     require_separate_compute_queue: bool,
     required_mem_size: vk::DeviceSize,
-    required_extensions: Vec<String>,
+    required_extensions: BTreeSet<String>,
     required_version: u32,
     required_features: vk::PhysicalDeviceFeatures,
     required_features2: vk::PhysicalDeviceFeatures2<'a>,
@@ -271,7 +298,7 @@ impl Default for SelectionCriteria<'_> {
             require_separate_transfer_queue: false,
             require_separate_compute_queue: false,
             required_mem_size: 0,
-            required_extensions: vec![],
+            required_extensions: BTreeSet::new(),
             required_version: vk::API_VERSION_1_0,
             required_features: vk::PhysicalDeviceFeatures::default(),
             required_features2: vk::PhysicalDeviceFeatures2::default(),
@@ -435,7 +462,59 @@ impl<'a> PhysicalDeviceSelector<'a> {
             return;
         }
 
-        todo!()
+        let required_extensions_supported = check_device_extension_support(
+            &device.available_extensions,
+            &criteria.required_extensions
+        );
+
+        if required_extensions_supported.len() != criteria.required_extensions.len() {
+            device.suitable = Suitable::No;
+            return;
+        }
+
+        if !criteria.defer_surface_initialization && criteria.require_present {
+            if let Some((surface_instance, surface)) = self.instance_info.surface_instance.zip(self.instance_info.surface) {
+                let formats = unsafe { surface_instance.get_physical_device_surface_formats(device.physical_device, surface) };
+                let Ok(formats) = formats else {
+                    device.suitable = Suitable::No;
+                    return;
+                };
+
+                let present_modes = unsafe { surface_instance.get_physical_device_surface_present_modes(device.physical_device, surface) };
+                let Ok(present_modes) = present_modes else {
+                    device.suitable = Suitable::No;
+                    return;
+                };
+
+                if present_modes.is_empty() || formats.is_empty() {
+                    device.suitable = Suitable::No;
+                    return;
+                }
+            };
+        };
+
+        let preferred_device_type = vk::PhysicalDeviceType::from_raw(criteria.preferred_device_type as u8 as i32);
+        if !criteria.allow_any_type && device.properties.device_type != preferred_device_type {
+            device.suitable = Suitable::Partial;
+        }
+
+        let required_features_supported = supports_features(
+            &device.features,
+            &criteria.required_features
+        );
+        if !required_features_supported {
+            device.suitable = Suitable::No;
+            return;
+        }
+
+        for memory_heap in device.memory_properties.memory_heaps {
+            if memory_heap.flags.contains(vk::MemoryHeapFlags::DEVICE_LOCAL) {
+                if memory_heap.size < criteria.required_mem_size {
+                    device.suitable = Suitable::No;
+                    return;
+                }
+            }
+        }
     }
 
     fn populate_device_details(
@@ -500,7 +579,7 @@ impl<'a> PhysicalDeviceSelector<'a> {
                     .to_string_lossy()
                     .to_string()
             })
-            .collect::<Vec<_>>();
+            .collect::<BTreeSet<_>>();
 
         physical_device
             .available_extensions
@@ -511,7 +590,7 @@ impl<'a> PhysicalDeviceSelector<'a> {
         Ok(physical_device)
     }
 
-    fn select_devices(&self) -> crate::Result<HashSet<PhysicalDevice>> {
+    fn select_devices(&self) -> crate::Result<BTreeSet<PhysicalDevice>> {
         let criteria = &self.selection_criteria;
         let instance_info = &self.instance_info;
         if criteria.require_present
@@ -554,7 +633,7 @@ impl<'a> PhysicalDeviceSelector<'a> {
         if criteria.use_first_gpu_unconditionally {
             let mut device = self.populate_device_details(physical_devices[0])?;
             fill_out_phys_dev_with_criteria(&mut device);
-            return Ok(HashSet::from([device]));
+            return Ok(BTreeSet::from([device]));
         };
 
         let physical_devices = physical_devices.into_iter().filter_map(|p| {
@@ -563,13 +642,27 @@ impl<'a> PhysicalDeviceSelector<'a> {
             if let Some(phys_dev) = phys_dev.as_mut() {
                 self.set_is_suitable(phys_dev);
             }
-            phys_dev
-        }).collect::<HashSet<_>>();
 
-        todo!()
+            phys_dev.and_then(|mut phys_dev| {
+                if phys_dev.suitable == Suitable::No {
+                    None
+                } else {
+                    fill_out_phys_dev_with_criteria(&mut phys_dev);
+                    Some(phys_dev)
+                }
+            })
+        }).collect::<BTreeSet<_>>();
+
+        Ok(physical_devices)
     }
 
     pub fn select(self) -> crate::Result<PhysicalDevice> {
-        Ok(self.select_devices().unwrap().into_iter().next().unwrap())
+        let devices = self.select_devices()?;
+
+        if devices.is_empty() {
+            Err(crate::PhysicalDeviceError::NoSuitableDevice.into())
+        } else {
+            Ok(unsafe { devices.into_iter().next().unwrap_unchecked() })
+        }
     }
 }

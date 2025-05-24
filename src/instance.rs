@@ -7,6 +7,7 @@ use std::borrow::Cow;
 use std::ffi;
 use std::ffi::{c_char, c_void, CStr, CString};
 use std::ops::Not;
+use std::time::Instant;
 
 unsafe extern "system" fn vulkan_debug_callback(
     message_severity: vk::DebugUtilsMessageSeverityFlagsEXT,
@@ -471,7 +472,7 @@ impl<'a> InstanceBuilder<'a> {
                         window_handle.as_raw(),
                         None
                     )?
-                })
+                });
             }
         };
 

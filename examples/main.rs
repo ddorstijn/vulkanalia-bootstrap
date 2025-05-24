@@ -1,11 +1,12 @@
 use ash::{khr, vk, Entry};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use raw_window_handle::{HasDisplayHandle, HasWindowHandle};
 use winit::application::ApplicationHandler;
-use winit::event::WindowEvent;
+use winit::event::{KeyEvent, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, EventLoop};
+use winit::keyboard::{Key, NamedKey};
 use winit::window::{Window, WindowAttributes, WindowId};
-use ash_bootstrap::{InstanceBuilder, PhysicalDeviceSelector, SystemInfo};
+use ash_bootstrap::{InstanceBuilder, PhysicalDeviceSelector};
 
 pub struct App {
     window: Option<Window>,
@@ -21,6 +22,7 @@ impl App {
 
 impl ApplicationHandler for App {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
+        let now = Instant::now();
         let monitor = event_loop.primary_monitor().unwrap();
         let window = event_loop
             .create_window(
@@ -37,11 +39,12 @@ impl ApplicationHandler for App {
                 vk::DebugUtilsMessageSeverityFlagsEXT::VERBOSE
                     | vk::DebugUtilsMessageSeverityFlagsEXT::INFO,
             )
-            .minimum_instance_version(vk::make_api_version(0, 1, 2, 0))
+            .minimum_instance_version(vk::make_api_version(0, 1, 3, 0))
             .build()
             .unwrap();
 
         let device = PhysicalDeviceSelector::new(&instance)
+            .allow_any_gpu_device_type(false)
             //.select_first_device_unconditionally(true)
             .select()
             .unwrap();
@@ -53,6 +56,7 @@ impl ApplicationHandler for App {
         window_id: WindowId,
         event: WindowEvent,
     ) {
+        event_loop.exit()
     }
 }
 
