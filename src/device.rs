@@ -1,10 +1,13 @@
 use crate::Instance;
-use ash::vk;
+use ash::{khr, vk};
 use std::borrow::Cow;
 use std::collections::HashSet;
 use std::hash::{Hash, Hasher};
 
-pub fn supports_features(supported: &vk::PhysicalDeviceFeatures, requested: &vk::PhysicalDeviceFeatures) -> bool {
+fn supports_features(
+    supported: &vk::PhysicalDeviceFeatures,
+    requested: &vk::PhysicalDeviceFeatures,
+) -> bool {
     macro_rules! check_feature {
         ($feature: ident) => {
             if requested.$feature == vk::TRUE && supported.$feature == vk::FALSE {
@@ -72,6 +75,76 @@ pub fn supports_features(supported: &vk::PhysicalDeviceFeatures, requested: &vk:
     true
 }
 
+#[inline]
+fn get_first_queue_index(
+    families: &[vk::QueueFamilyProperties],
+    desired_flags: vk::QueueFlags,
+) -> Option<usize> {
+    families
+        .iter()
+        .position(|f| f.queue_flags.contains(desired_flags))
+}
+
+/// Finds the queue which is separate from the graphics queue and has the desired flag and not the
+/// undesired flag, but will select it if no better options are available for compute support. Returns
+/// QUEUE_INDEX_MAX_VALUE if none is found.
+fn get_separate_queue_index(
+    families: &[vk::QueueFamilyProperties],
+    desired_flags: vk::QueueFlags,
+    undesired_flags: vk::QueueFlags,
+) -> Option<usize> {
+    let mut index = None;
+    for (i, family) in families.iter().enumerate() {
+        if family.queue_flags.contains(desired_flags)
+            && !family.queue_flags.contains(vk::QueueFlags::GRAPHICS)
+        {
+            if !family.queue_flags.contains(undesired_flags) {
+                return Some(i);
+            } else {
+                index = Some(i);
+            }
+        }
+    }
+
+    index
+}
+
+/// finds the first queue which supports only the desired flag (not graphics or transfer). Returns QUEUE_INDEX_MAX_VALUE if none is found.
+fn get_dedicated_queue_index(
+    families: &[vk::QueueFamilyProperties],
+    desired_flags: vk::QueueFlags,
+    undesired_flags: vk::QueueFlags,
+) -> Option<usize> {
+    families
+        .iter()
+        .position(|f| {
+            f.queue_flags.contains(desired_flags)
+                && !f.queue_flags.contains(vk::QueueFlags::GRAPHICS)
+                && !f.queue_flags.contains(undesired_flags)
+        })
+}
+
+fn get_present_queue_index(
+    instance: Option<&khr::surface::Instance>,
+    device: &vk::PhysicalDevice,
+    surface: Option<vk::SurfaceKHR>,
+    families: &[vk::QueueFamilyProperties],
+) -> Option<usize> {
+    for (i, _) in families.iter().enumerate() {
+        if let Some((surface, instance)) = surface.zip(instance) {
+            let present_support = unsafe { instance.get_physical_device_surface_support(*device, i as u32, surface) };
+
+            if let Ok(present_support) = present_support {
+                if present_support {
+                    return Some(i);
+                }
+            }
+        }
+    };
+
+    None
+}
+
 #[repr(u8)]
 #[derive(Default, Debug, Eq, PartialEq, Ord, PartialOrd)]
 pub enum PreferredDeviceType {
@@ -95,7 +168,7 @@ pub enum Suitable {
 pub struct PhysicalDevice {
     name: String,
     physical_device: vk::PhysicalDevice,
-    surface: vk::SurfaceKHR,
+    surface: Option<vk::SurfaceKHR>,
 
     features: vk::PhysicalDeviceFeatures,
     properties: vk::PhysicalDeviceProperties,
@@ -157,7 +230,8 @@ impl PhysicalDevice {
 
 struct PhysicalDeviceInstanceInfo<'a> {
     instance: &'a ash::Instance,
-    surface: vk::SurfaceKHR,
+    surface: Option<vk::SurfaceKHR>,
+    surface_instance: Option<&'a khr::surface::Instance>,
     version: u32,
     headless: bool,
     properties2_ext_enabled: bool,
@@ -216,19 +290,19 @@ pub struct PhysicalDeviceSelector<'a> {
 impl<'a> PhysicalDeviceSelector<'a> {
     pub fn new(
         instance: &'a Instance<'a>,
-        surface: Option<vk::SurfaceKHR>,
     ) -> PhysicalDeviceSelector<'a> {
         let enable_portability_subset = cfg!(feature = "portability");
         Self {
             instance_info: PhysicalDeviceInstanceInfo {
                 instance: instance.as_ref(),
-                surface: surface.unwrap_or_default(),
+                surface_instance: instance.surface_instance.as_ref(),
+                surface: instance.surface,
                 version: instance.instance_version,
-                headless: instance.headless,
+                headless: instance.surface_instance.is_none(),
                 properties2_ext_enabled: instance.properties2_ext_enabled,
             },
             selection_criteria: SelectionCriteria {
-                require_present: !instance.headless,
+                require_present: instance.surface_instance.is_some(),
                 required_version: instance.api_version,
                 enable_portability_subset,
                 ..Default::default()
@@ -237,7 +311,7 @@ impl<'a> PhysicalDeviceSelector<'a> {
     }
 
     pub fn surface(mut self, surface: vk::SurfaceKHR) -> Self {
-        self.instance_info.surface = surface;
+        self.instance_info.surface.replace(surface);
         self
     }
 
@@ -286,19 +360,80 @@ impl<'a> PhysicalDeviceSelector<'a> {
         self
     }
 
-    fn is_device_suitable(&self, device: &PhysicalDevice) -> Suitable {
-        let suitable = Suitable::Yes;
+    fn set_is_suitable(&self, device: &mut PhysicalDevice) {
         let criteria = &self.selection_criteria;
 
-        if Cow::Borrowed(&criteria.name)
+        if !criteria.name.is_empty() && Cow::Borrowed(&criteria.name)
             != device
                 .properties
                 .device_name_as_c_str()
                 .expect("device name should be correct cstr")
                 .to_string_lossy()
         {
-            return Suitable::No;
+            device.suitable = Suitable::No;
+            return;
         };
+
+        if criteria.required_version > device.properties.api_version {
+            device.suitable = Suitable::No;
+            return;
+        }
+
+        let dedicated_compute = get_dedicated_queue_index(
+            &device.queue_families,
+            vk::QueueFlags::COMPUTE,
+            vk::QueueFlags::TRANSFER,
+        );
+
+        let dedicated_transfer = get_dedicated_queue_index(
+            &device.queue_families,
+            vk::QueueFlags::TRANSFER,
+            vk::QueueFlags::COMPUTE,
+        );
+
+        let separate_compute = get_separate_queue_index(
+            &device.queue_families,
+            vk::QueueFlags::COMPUTE,
+            vk::QueueFlags::TRANSFER,
+        );
+
+        let separate_transfer = get_separate_queue_index(
+            &device.queue_families,
+            vk::QueueFlags::TRANSFER,
+            vk::QueueFlags::COMPUTE,
+        );
+
+        let present_queue = get_present_queue_index(
+            self.instance_info.surface_instance,
+            &device.physical_device,
+            self.instance_info.surface,
+            &device.queue_families
+        );
+
+        if criteria.require_dedicated_compute_queue && dedicated_compute.is_none() {
+            device.suitable = Suitable::No;
+            return;
+        }
+
+        if criteria.require_dedicated_transfer_queue && dedicated_transfer.is_none() {
+            device.suitable = Suitable::No;
+            return;
+        }
+
+        if criteria.require_separate_transfer_queue && separate_transfer.is_none() {
+            device.suitable = Suitable::No;
+            return;
+        }
+
+        if criteria.require_separate_compute_queue && separate_compute.is_none() {
+            device.suitable = Suitable::No;
+            return;
+        }
+
+        if criteria.require_present && present_queue.is_none() && !criteria.defer_surface_initialization {
+            device.suitable = Suitable::No;
+            return;
+        }
 
         todo!()
     }
@@ -330,7 +465,7 @@ impl<'a> PhysicalDeviceSelector<'a> {
                     .instance
                     .get_physical_device_features(vk_phys_device)
             },
-            memory_properties:  unsafe {
+            memory_properties: unsafe {
                 instance_info
                     .instance
                     .get_physical_device_memory_properties(vk_phys_device)
@@ -381,7 +516,7 @@ impl<'a> PhysicalDeviceSelector<'a> {
         let instance_info = &self.instance_info;
         if criteria.require_present
             && !criteria.defer_surface_initialization
-            && instance_info.surface == vk::SurfaceKHR::default()
+            && instance_info.surface == None
         {
             return Err(crate::PhysicalDeviceError::NoSurfaceProvided.into());
         };
@@ -423,15 +558,18 @@ impl<'a> PhysicalDeviceSelector<'a> {
         };
 
         let physical_devices = physical_devices.into_iter().filter_map(|p| {
-            let phys_dev = self.populate_device_details(p).ok();
+            let mut phys_dev = self.populate_device_details(p).ok();
 
-            phys_dev.map(|phys_dev| {})
-        });
+            if let Some(phys_dev) = phys_dev.as_mut() {
+                self.set_is_suitable(phys_dev);
+            }
+            phys_dev
+        }).collect::<HashSet<_>>();
 
         todo!()
     }
 
     pub fn select(self) -> crate::Result<PhysicalDevice> {
-        todo!()
+        Ok(self.select_devices().unwrap().into_iter().next().unwrap())
     }
 }

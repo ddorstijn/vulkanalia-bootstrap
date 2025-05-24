@@ -9,3 +9,5 @@ mod tracing;
 
 pub use error::*;
 pub use instance::{Instance, InstanceBuilder};
+pub use device::PhysicalDeviceSelector;
+pub use system_info::SystemInfo;

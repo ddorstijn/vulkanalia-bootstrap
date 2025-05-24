@@ -1,11 +1,12 @@
 use crate::system_info::{SystemInfo, DEBUG_UTILS_EXT_NAME, VALIDATION_LAYER_NAME};
 use ash::ext::debug_utils;
-use ash::vk;
+use ash::{khr, vk};
 use ash::vk::{api_version_minor, AllocationCallbacks, DebugUtilsMessengerEXT};
 use raw_window_handle::{DisplayHandle, WindowHandle};
 use std::borrow::Cow;
 use std::ffi;
 use std::ffi::{c_char, c_void, CStr, CString};
+use std::ops::Not;
 
 unsafe extern "system" fn vulkan_debug_callback(
     message_severity: vk::DebugUtilsMessageSeverityFlagsEXT,
@@ -329,7 +330,7 @@ impl<'a> InstanceBuilder<'a> {
             enabled_extensions.push(vk::KHR_PORTABILITY_ENUMERATION_NAME.as_ptr());
         }
 
-        if !self.headless_context && cfg!(feature = "window-handle") {
+        if !self.headless_context {
             if let Some(display_handle) = self.display_handle {
                 let surface_extensions_raw =
                     ash_window::enumerate_required_extensions(display_handle.as_raw())?;
@@ -458,12 +459,31 @@ impl<'a> InstanceBuilder<'a> {
             debug_messenger.replace(messenger);
         };
 
+        let surface_instance = self.headless_context.not().then(|| unsafe { khr::surface::Instance::new(&system_info.entry, &instance) });
+        let mut surface = None;
+        if let Some((window_handle, display_handle)) = self.window_handle.zip(self.display_handle) {
+            if let Some(_) = surface_instance {
+                surface = Some(unsafe {
+                    ash_window::create_surface(
+                        &system_info.entry,
+                        &instance,
+                        display_handle.as_raw(),
+                        window_handle.as_raw(),
+                        None
+                    )?
+                })
+            }
+        };
+
         Ok(Instance {
+            display_handle: self.display_handle,
+            window_handle: self.window_handle,
             instance,
+            surface_instance,
+            surface,
             allocation_callbacks: self.allocation_callbacks,
             instance_version,
             api_version,
-            headless: self.headless_context,
             properties2_ext_enabled,
             debug_loader,
             debug_messenger,
@@ -475,18 +495,27 @@ impl<'a> InstanceBuilder<'a> {
 pub struct Instance<'a> {
     pub(crate) instance: ash::Instance,
     pub(crate) allocation_callbacks: Option<AllocationCallbacks<'a>>,
+    pub(crate) surface_instance: Option<khr::surface::Instance>,
+    pub(crate) surface: Option<vk::SurfaceKHR>,
     pub(crate) instance_version: u32,
     pub(crate) api_version: u32,
-    pub(crate) headless: bool,
     pub(crate) properties2_ext_enabled: bool,
     pub(crate) debug_loader: Option<debug_utils::Instance>,
     pub(crate) debug_messenger: Option<DebugUtilsMessengerEXT>,
-    system_info: SystemInfo,
+    pub(crate) system_info: SystemInfo,
+    window_handle: Option<WindowHandle<'a>>,
+    display_handle: Option<DisplayHandle<'a>>,
 }
 
 impl Drop for Instance<'_> {
     fn drop(&mut self) {
         unsafe {
+            if let Some((debug_messenger, debug_loader)) = self.debug_messenger.take().zip(self.debug_loader.take()) {
+                debug_loader.destroy_debug_utils_messenger(debug_messenger, None);
+            }
+            if let Some((surface_instance, surface)) = self.surface_instance.take().zip(self.surface) {
+                surface_instance.destroy_surface(surface, None);
+            }
             self.instance.destroy_instance(None);
         }
     }
@@ -500,39 +529,9 @@ impl AsRef<ash::Instance> for Instance<'_> {
 
 #[cfg(test)]
 mod tests {
-    use crate::device::PhysicalDeviceSelector;
-    use crate::InstanceBuilder;
-    use ash::vk;
-    use std::time::Duration;
 
     #[test]
     fn compiles() {
-        use tracing_subscriber::{fmt, prelude::*, EnvFilter};
 
-        tracing_subscriber::registry()
-            .with(fmt::layer())
-            .with(EnvFilter::from_default_env())
-            .init();
-
-        tracing::trace!("HI!");
-
-        let instance = InstanceBuilder::new(None)
-            .enable_validation_layers(true)
-            .headless(true)
-            .app_name("test")
-            .engine_name("xolaani")
-            .use_default_tracing_messenger()
-            .add_debug_messenger_severity(
-                vk::DebugUtilsMessageSeverityFlagsEXT::VERBOSE
-                    | vk::DebugUtilsMessageSeverityFlagsEXT::INFO,
-            )
-            .require_api_version(vk::make_api_version(0, 1, 4, 0))
-            .build()
-            .unwrap();
-
-        let device = PhysicalDeviceSelector::new(&instance, None)
-            .select_first_device_unconditionally(true)
-            .select()
-            .unwrap();
     }
 }

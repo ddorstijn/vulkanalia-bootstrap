@@ -31,10 +31,9 @@ impl Debug for SystemInfo {
 
 impl SystemInfo {
     pub fn get_system_info() -> crate::Result<Self> {
+        let entry = unsafe { Entry::load() }?;
         let mut validation_layers_available = false;
         let mut debug_utils_available = false;
-
-        let entry = unsafe { Entry::load()? };
 
         let available_layers = unsafe { entry.enumerate_instance_layer_properties() }?;
 
