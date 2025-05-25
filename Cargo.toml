@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-ash = { version = "0.38.0", features = ["linked", "loaded"] }
+ash = { version = "0.38.0", features = ["loaded"] }
 ash-window = { version = "0.13.0" }
 thiserror = "2.0.12"
 anyhow = "1.0.98"
@@ -21,6 +21,8 @@ path = "examples/main.rs"
 harness = false
 
 [features]
+
+# Enables vk_khr_portability_subset and adds ENUMERATE_PORTABILITY_KHR to VkInstanceCreateInfoFlags
 portability = []
 
 default = []

@@ -6,7 +6,7 @@ use winit::event::{KeyEvent, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, EventLoop};
 use winit::keyboard::{Key, NamedKey};
 use winit::window::{Window, WindowAttributes, WindowId};
-use ash_bootstrap::{InstanceBuilder, PhysicalDeviceSelector};
+use ash_bootstrap::{DeviceBuilder, InstanceBuilder, PhysicalDeviceSelector};
 
 pub struct App {
     window: Option<Window>,
@@ -31,7 +31,7 @@ impl ApplicationHandler for App {
             .unwrap();
 
         let instance = InstanceBuilder::new(Some((window.window_handle().unwrap(), window.display_handle().unwrap())))
-            .enable_validation_layers(true)
+            .request_validation_layers(true)
             .app_name("test")
             .engine_name("xolaani")
             .use_default_tracing_messenger()
@@ -43,10 +43,26 @@ impl ApplicationHandler for App {
             .build()
             .unwrap();
 
-        let device = PhysicalDeviceSelector::new(&instance)
-            .allow_any_gpu_device_type(false)
+        let physical_device_selector = PhysicalDeviceSelector::new(&instance)
+            .allow_any_gpu_device_type(false);
+
+        let mut physical_device = physical_device_selector
             //.select_first_device_unconditionally(true)
             .select()
+            .unwrap();
+
+        physical_device.enable_extensions_if_present([
+            vk::KHR_DYNAMIC_RENDERING_NAME.to_string_lossy(),
+            vk::KHR_DEPTH_STENCIL_RESOLVE_NAME.to_string_lossy(),
+            vk::KHR_CREATE_RENDERPASS2_NAME.to_string_lossy(),
+            vk::KHR_MULTIVIEW_NAME.to_string_lossy(),
+            vk::KHR_MAINTENANCE2_NAME.to_string_lossy(),
+        ]);
+
+        println!("{physical_device:#?}");
+
+        let device_builder = DeviceBuilder::new(&physical_device, &instance)
+            .build()
             .unwrap();
     }
 

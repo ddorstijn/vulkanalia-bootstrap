@@ -10,4 +10,4 @@ pub(crate) use instance::Instance;
 
 pub use error::*;
 pub use instance::{InstanceBuilder};
-pub use device::PhysicalDeviceSelector;
+pub use device::{PhysicalDeviceSelector, DeviceBuilder};

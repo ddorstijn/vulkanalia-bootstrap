@@ -3,7 +3,9 @@ use ash::{khr, vk};
 use std::borrow::Cow;
 use std::cmp::Ordering;
 use std::collections::{BTreeSet, HashSet};
+use std::ffi::{CStr, CString};
 use std::hash::{Hash, Hasher};
+use ash::vk::AllocationCallbacks;
 
 fn supports_features(
     supported: &vk::PhysicalDeviceFeatures,
@@ -147,7 +149,7 @@ fn get_present_queue_index(
 }
 
 fn check_device_extension_support(
-    available_extensions: &BTreeSet<String>,
+    available_extensions: &BTreeSet<Cow<'_, str>>,
     required_extensions: &BTreeSet<String>
 ) -> BTreeSet<String> {
     let mut extensions_to_enable = BTreeSet::new();
@@ -184,7 +186,7 @@ pub enum Suitable {
 }
 
 #[derive(Default, Debug)]
-pub struct PhysicalDevice {
+pub struct PhysicalDevice<'a> {
     name: String,
     physical_device: vk::PhysicalDevice,
     surface: Option<vk::SurfaceKHR>,
@@ -193,17 +195,17 @@ pub struct PhysicalDevice {
     properties: vk::PhysicalDeviceProperties,
     memory_properties: vk::PhysicalDeviceMemoryProperties,
     instance_version: u32,
-    extensions_to_enable: BTreeSet<String>,
-    available_extensions: BTreeSet<String>,
+    extensions_to_enable: BTreeSet<Cow<'a, str>>,
+    available_extensions: BTreeSet<Cow<'a, str>>,
     queue_families: Vec<vk::QueueFamilyProperties>,
     defer_surface_initialization: bool,
     properties2_ext_enabled: bool,
     suitable: Suitable,
 }
 
-impl Eq for PhysicalDevice {}
+impl Eq for PhysicalDevice<'_> {}
 
-impl PartialEq<Self> for PhysicalDevice {
+impl PartialEq<Self> for PhysicalDevice<'_> {
     fn eq(&self, other: &Self) -> bool {
         self.name.eq(&other.name)
         && self.physical_device.eq(&other.physical_device)
@@ -211,20 +213,20 @@ impl PartialEq<Self> for PhysicalDevice {
     }
 }
 
-impl PartialOrd for PhysicalDevice {
+impl PartialOrd for PhysicalDevice<'_> {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
         self.suitable.partial_cmp(&other.suitable)
     }
 }
 
-impl Ord for PhysicalDevice {
+impl Ord for PhysicalDevice<'_> {
     fn cmp(&self, other: &Self) -> Ordering {
         self.suitable.cmp(&other.suitable)
     }
 }
 
-impl PhysicalDevice {
-    pub fn enable_extension_if_present(&mut self, extension: impl Into<String>) -> bool {
+impl<'a> PhysicalDevice<'a> {
+    pub fn enable_extension_if_present(&mut self, extension: impl Into<Cow<'a, str>>) -> bool {
         let extension = extension.into();
 
         if self.available_extensions.contains(&extension) {
@@ -234,7 +236,7 @@ impl PhysicalDevice {
         }
     }
 
-    pub fn enable_extensions_if_present<T: Eq + Hash + Into<String>, I: IntoIterator<Item = T>>(
+    pub fn enable_extensions_if_present<T: Eq + Hash + Into<Cow<'a, str>>, I: IntoIterator<Item = T>>(
         &mut self,
         extensions: I,
     ) -> bool {
@@ -583,14 +585,14 @@ impl<'a> PhysicalDeviceSelector<'a> {
 
         physical_device
             .available_extensions
-            .extend(available_extensions_names);
+            .extend(available_extensions_names.iter().map(|s| Cow::Owned(s.clone())));
 
         physical_device.properties2_ext_enabled = instance_info.properties2_ext_enabled;
 
         Ok(physical_device)
     }
 
-    fn select_devices(&self) -> crate::Result<BTreeSet<PhysicalDevice>> {
+    fn select_devices(&'a self) -> crate::Result<BTreeSet<PhysicalDevice<'a>>> {
         let criteria = &self.selection_criteria;
         let instance_info = &self.instance_info;
         if criteria.require_present
@@ -610,8 +612,7 @@ impl<'a> PhysicalDeviceSelector<'a> {
             physical_device.features = criteria.required_features;
             let mut portability_ext_available = false;
             let portability_name = vk::KHR_PORTABILITY_SUBSET_NAME
-                .to_string_lossy()
-                .to_string();
+                .to_string_lossy();
             for ext in &physical_device.available_extensions {
                 if criteria.enable_portability_subset && ext == &portability_name {
                     portability_ext_available = true;
@@ -621,7 +622,7 @@ impl<'a> PhysicalDeviceSelector<'a> {
             physical_device.extensions_to_enable.clear();
             physical_device
                 .extensions_to_enable
-                .extend(criteria.required_extensions.clone());
+                .extend(criteria.required_extensions.iter().map(|s| Cow::Owned(s.clone())));
 
             if portability_ext_available {
                 physical_device
@@ -656,7 +657,7 @@ impl<'a> PhysicalDeviceSelector<'a> {
         Ok(physical_devices)
     }
 
-    pub fn select(self) -> crate::Result<PhysicalDevice> {
+    pub fn select(&'a self) -> crate::Result<PhysicalDevice<'a>> {
         let devices = self.select_devices()?;
 
         if devices.is_empty() {
@@ -665,4 +666,106 @@ impl<'a> PhysicalDeviceSelector<'a> {
             Ok(unsafe { devices.into_iter().next().unwrap_unchecked() })
         }
     }
+}
+
+fn cow_to_c_cow(cow: Cow<'_, str>) -> Cow<'_, CStr> {
+    match cow {
+        Cow::Borrowed(s) => {
+            // Check if `s` is a valid C string
+            if let Ok(c_str) = CStr::from_bytes_with_nul(s.as_bytes()) {
+                Cow::Borrowed(c_str)
+            } else {
+                // Convert to CString, appending a null byte
+                let c_string = CString::new(s).expect("Invalid C string");
+                Cow::Owned(c_string)
+            }
+        }
+        Cow::Owned(s) => {
+            // Convert owned String to CString
+            let c_string = CString::new(s).expect("Invalid C string");
+            Cow::Owned(c_string)
+        }
+    }
+}
+
+pub struct DeviceBuilder<'a> {
+    instance: &'a Instance<'a>,
+    physical_device: &'a PhysicalDevice<'a>,
+    allocation_callbacks: Option<AllocationCallbacks<'a>>,
+    // TODO: pNext chains for features
+    // TODO: queue descriptions
+}
+
+impl<'a> DeviceBuilder<'a> {
+    pub fn new(physical_device: &'a PhysicalDevice<'a>, instance: &'a Instance<'a>) -> DeviceBuilder<'a> {
+        Self {
+            physical_device,
+            allocation_callbacks: None,
+            instance
+        }
+    }
+
+    pub fn allocation_callbacks(mut self, allocation_callbacks: AllocationCallbacks<'a>) -> Self {
+        self.allocation_callbacks.replace(allocation_callbacks);
+        self
+    }
+
+    pub fn build(self) -> crate::Result<Device<'a>> {
+        // TODO: custom queue setup
+        // (index, priorities)
+        let queue_descriptions = self.physical_device.queue_families.iter().enumerate().map(|(index, _)| (index, [1.])).collect::<Vec<_>>();
+
+        let queue_create_infos = queue_descriptions
+            .iter()
+            .map(|(index, priorities)| {
+                let queue_create_info = vk::DeviceQueueCreateInfo::default()
+                    .queue_family_index(*index as u32)
+                    .queue_priorities(priorities);
+                queue_create_info
+            })
+            .collect::<Vec<_>>();
+        let extensions_to_enable = self.physical_device.extensions_to_enable.iter().map(|e| cow_to_c_cow(e.clone())).collect::<Vec<_>>();
+        println!("EXTENSIONS: {extensions_to_enable:#?}");
+
+        let mut extensions_to_enable = extensions_to_enable.iter().map(|e| e.as_ptr()).collect::<Vec<_>>();
+        if self.physical_device.surface.is_some() || self.physical_device.defer_surface_initialization {
+            extensions_to_enable.push(vk::KHR_SWAPCHAIN_NAME.as_ptr());
+        }
+
+        let device_create_info = vk::DeviceCreateInfo::default()
+            .queue_create_infos(&queue_create_infos)
+            .enabled_extension_names(&extensions_to_enable);
+
+        let mut device = unsafe { self.instance.as_ref().create_device(self.physical_device.physical_device, &device_create_info, self.allocation_callbacks.as_ref()) }?;
+
+        let physical_device = self.physical_device;
+        
+        Ok(Device {
+            device,
+            physical_device: physical_device,
+            surface: physical_device.surface,
+            allocation_callbacks: self.allocation_callbacks,
+            queue_families: &physical_device.queue_families,
+            instance_version: physical_device.instance_version,
+        })
+    }
+}
+
+pub struct Device<'a> {
+    device: ash::Device,
+    physical_device: &'a PhysicalDevice<'a>,
+    surface: Option<vk::SurfaceKHR>,
+    queue_families: &'a [vk::QueueFamilyProperties],
+    allocation_callbacks: Option<AllocationCallbacks<'a>>,
+    instance_version: u32,
+}
+
+impl<'a> AsRef<ash::Device> for Device<'a> {
+    fn as_ref(&self) -> &ash::Device {
+        &self.device
+    }
+}
+
+impl<'a> Device<'a> {
+
 }
