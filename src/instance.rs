@@ -1,7 +1,7 @@
 use crate::system_info::{SystemInfo, DEBUG_UTILS_EXT_NAME, VALIDATION_LAYER_NAME};
 use ash::ext::debug_utils;
-use ash::{khr, vk};
 use ash::vk::{api_version_minor, AllocationCallbacks, DebugUtilsMessengerEXT};
+use ash::{khr, vk};
 use raw_window_handle::{DisplayHandle, WindowHandle};
 use std::borrow::Cow;
 use std::ffi;
@@ -460,7 +460,10 @@ impl<'a> InstanceBuilder<'a> {
             debug_messenger.replace(messenger);
         };
 
-        let surface_instance = self.headless_context.not().then(|| unsafe { khr::surface::Instance::new(&system_info.entry, &instance) });
+        let surface_instance = self
+            .headless_context
+            .not()
+            .then(|| unsafe { khr::surface::Instance::new(&system_info.entry, &instance) });
         let mut surface = None;
         if let Some((window_handle, display_handle)) = self.window_handle.zip(self.display_handle) {
             if let Some(_) = surface_instance {
@@ -470,7 +473,7 @@ impl<'a> InstanceBuilder<'a> {
                         &instance,
                         display_handle.as_raw(),
                         window_handle.as_raw(),
-                        None
+                        None,
                     )?
                 });
             }
@@ -511,10 +514,14 @@ pub struct Instance<'a> {
 impl Drop for Instance<'_> {
     fn drop(&mut self) {
         unsafe {
-            if let Some((debug_messenger, debug_loader)) = self.debug_messenger.take().zip(self.debug_loader.take()) {
+            if let Some((debug_messenger, debug_loader)) =
+                self.debug_messenger.take().zip(self.debug_loader.take())
+            {
                 debug_loader.destroy_debug_utils_messenger(debug_messenger, None);
             }
-            if let Some((surface_instance, surface)) = self.surface_instance.take().zip(self.surface) {
+            if let Some((surface_instance, surface)) =
+                self.surface_instance.take().zip(self.surface)
+            {
                 surface_instance.destroy_surface(surface, None);
             }
             self.instance.destroy_instance(None);
@@ -532,7 +539,5 @@ impl AsRef<ash::Instance> for Instance<'_> {
 mod tests {
 
     #[test]
-    fn compiles() {
-
-    }
+    fn compiles() {}
 }

@@ -1,14 +1,14 @@
+use ash::{khr, vk, Entry};
+use ash_bootstrap::{DeviceBuilder, InstanceBuilder, PhysicalDeviceSelector};
+use raw_window_handle::{HasDisplayHandle, HasWindowHandle};
 use std::ffi::c_void;
 use std::rc::Rc;
-use ash::{khr, vk, Entry};
 use std::time::{Duration, Instant};
-use raw_window_handle::{HasDisplayHandle, HasWindowHandle};
 use winit::application::ApplicationHandler;
 use winit::event::{KeyEvent, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, EventLoop};
 use winit::keyboard::{Key, NamedKey};
 use winit::window::{Window, WindowAttributes, WindowId};
-use ash_bootstrap::{DeviceBuilder, InstanceBuilder, PhysicalDeviceSelector};
 
 pub struct App {
     window: Option<Window>,
@@ -16,38 +16,41 @@ pub struct App {
 
 impl App {
     pub fn new() -> Self {
-        Self {
-            window: None,
-        }
+        Self { window: None }
     }
 }
 
 impl ApplicationHandler for App {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
-        let now = Instant::now();
         let monitor = event_loop.primary_monitor().unwrap();
         let window = event_loop
-            .create_window(
-                WindowAttributes::default(),
-            )
+            .create_window(WindowAttributes::default())
             .unwrap();
 
-        let instance = InstanceBuilder::new(Some((window.window_handle().unwrap(), window.display_handle().unwrap())))
-            .request_validation_layers(true)
-            .app_name("test")
-            .engine_name("xolaani")
-            .use_default_tracing_messenger()
-            .add_debug_messenger_severity(
-                vk::DebugUtilsMessageSeverityFlagsEXT::VERBOSE
-                    | vk::DebugUtilsMessageSeverityFlagsEXT::INFO,
-            )
-            .minimum_instance_version(vk::make_api_version(0, 1, 3, 0))
-            .build()
-            .unwrap();
+        let instance = InstanceBuilder::new(Some((
+            window.window_handle().unwrap(),
+            window.display_handle().unwrap(),
+        )))
+        .request_validation_layers(true)
+        .headless(true)
+        .app_name("test")
+        .engine_name("xolaani")
+        .use_default_tracing_messenger()
+        .add_debug_messenger_severity(
+            vk::DebugUtilsMessageSeverityFlagsEXT::VERBOSE
+                | vk::DebugUtilsMessageSeverityFlagsEXT::INFO,
+        )
+        .minimum_instance_version(vk::make_api_version(0, 1, 3, 0))
+        .build()
+        .unwrap();
 
         let vk13_features = vk::PhysicalDeviceVulkan13Features::default()
-            .robust_image_access(true)
-            .descriptor_binding_inline_uniform_block_update_after_bind(true);
+            .dynamic_rendering(true)
+            .descriptor_binding_inline_uniform_block_update_after_bind(true)
+            .texture_compression_astc_hdr(true);
+
+        // let generic = GenericFeaturesPNextNode::from(vk13_features);
+        // println!("generic {generic:?}");
 
         let physical_device_selector = PhysicalDeviceSelector::new(&instance)
             .allow_any_gpu_device_type(false)

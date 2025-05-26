@@ -8,6 +8,6 @@ mod tracing;
 
 pub(crate) use instance::Instance;
 
+pub use device::{DeviceBuilder, PhysicalDeviceSelector};
 pub use error::*;
-pub use instance::{InstanceBuilder};
-pub use device::{PhysicalDeviceSelector, DeviceBuilder};
+pub use instance::InstanceBuilder;

@@ -1,5 +1,7 @@
 use crate::Instance;
+use ash::vk::{AllocationCallbacks, BaseOutStructure, Bool32, PhysicalDevice16BitStorageFeatures};
 use ash::{khr, vk};
+use bytemuck::{NoUninit, Pod};
 use std::borrow::Cow;
 use std::cell::RefCell;
 use std::cmp::Ordering;
@@ -7,15 +9,15 @@ use std::collections::{BTreeSet, HashSet};
 use std::ffi::{c_void, CStr, CString};
 use std::fmt::Debug;
 use std::hash::{Hash, Hasher};
+use std::hint::unreachable_unchecked;
 use std::marker::PhantomData;
 use std::ops::Deref;
-use ash::vk::{AllocationCallbacks, BaseOutStructure};
 
 fn supports_features(
     supported: &vk::PhysicalDeviceFeatures,
     requested: &vk::PhysicalDeviceFeatures,
-    features_supported: &GenericFeatureChain<'_>,
-    features_requested: &GenericFeatureChain<'_>,
+    features_supported: &GenericFeatureChain,
+    features_requested: &GenericFeatureChain,
 ) -> bool {
     macro_rules! check_feature {
         ($feature: ident) => {
@@ -124,13 +126,11 @@ fn get_dedicated_queue_index(
     desired_flags: vk::QueueFlags,
     undesired_flags: vk::QueueFlags,
 ) -> Option<usize> {
-    families
-        .iter()
-        .position(|f| {
-            f.queue_flags.contains(desired_flags)
-                && !f.queue_flags.contains(vk::QueueFlags::GRAPHICS)
-                && !f.queue_flags.contains(undesired_flags)
-        })
+    families.iter().position(|f| {
+        f.queue_flags.contains(desired_flags)
+            && !f.queue_flags.contains(vk::QueueFlags::GRAPHICS)
+            && !f.queue_flags.contains(undesired_flags)
+    })
 }
 
 fn get_present_queue_index(
@@ -141,7 +141,8 @@ fn get_present_queue_index(
 ) -> Option<usize> {
     for (i, _) in families.iter().enumerate() {
         if let Some((surface, instance)) = surface.zip(instance) {
-            let present_support = unsafe { instance.get_physical_device_surface_support(*device, i as u32, surface) };
+            let present_support =
+                unsafe { instance.get_physical_device_surface_support(*device, i as u32, surface) };
 
             if let Ok(present_support) = present_support {
                 if present_support {
@@ -149,14 +150,14 @@ fn get_present_queue_index(
                 }
             }
         }
-    };
+    }
 
     None
 }
 
 fn check_device_extension_support(
     available_extensions: &BTreeSet<Cow<'_, str>>,
-    required_extensions: &BTreeSet<String>
+    required_extensions: &BTreeSet<String>,
 ) -> BTreeSet<String> {
     let mut extensions_to_enable = BTreeSet::new();
 
@@ -207,7 +208,7 @@ pub struct PhysicalDevice<'a> {
     defer_surface_initialization: bool,
     properties2_ext_enabled: bool,
     suitable: Suitable,
-    supported_features_chain: GenericFeatureChain<'a>
+    supported_features_chain: GenericFeatureChain<'a>,
 }
 
 impl Eq for PhysicalDevice<'_> {}
@@ -215,8 +216,8 @@ impl Eq for PhysicalDevice<'_> {}
 impl PartialEq<Self> for PhysicalDevice<'_> {
     fn eq(&self, other: &Self) -> bool {
         self.name.eq(&other.name)
-        && self.physical_device.eq(&other.physical_device)
-        && self.suitable.eq(&other.suitable)
+            && self.physical_device.eq(&other.physical_device)
+            && self.suitable.eq(&other.suitable)
     }
 }
 
@@ -243,7 +244,10 @@ impl<'a> PhysicalDevice<'a> {
         }
     }
 
-    pub fn enable_extensions_if_present<T: Eq + Hash + Into<Cow<'a, str>>, I: IntoIterator<Item = T>>(
+    pub fn enable_extensions_if_present<
+        T: Eq + Hash + Into<Cow<'a, str>>,
+        I: IntoIterator<Item = T>,
+    >(
         &mut self,
         extensions: I,
     ) -> bool {
@@ -273,56 +277,516 @@ struct PhysicalDeviceInstanceInfo<'a> {
     properties2_ext_enabled: bool,
 }
 
-impl GenericFeaturesPNextNode<'_> {
-    const FIELD_CAPACITY: usize = 256;
-
-    fn combine(&mut self, other: &GenericFeaturesPNextNode) {
-        assert_eq!(self.s_type, other.s_type);
-
-        for i in 0..GenericFeaturesPNextNode::FIELD_CAPACITY {
-            self.fields[i] = vk::Bool32::from(self.fields[i] == vk::TRUE || other.fields[i] == vk::TRUE);
-        }
-    }
-}
-
-#[repr(C)]
+// TODO: proper transmute via ash
+//region vulkanfeatures
 #[derive(Debug, Clone)]
-struct GenericFeaturesPNextNode<'a> {
-    s_type: vk::StructureType,
-    p_next: *mut c_void,
-    fields: [vk::Bool32; GenericFeaturesPNextNode::FIELD_CAPACITY],
-    _marker: PhantomData<&'a ()>,
+pub enum VulkanPhysicalDeviceFeature2<'a> {
+    PhysicalDeviceVulkan11Features(vk::PhysicalDeviceVulkan11Features<'a>),
+    PhysicalDeviceVulkan12Features(vk::PhysicalDeviceVulkan12Features<'a>),
+    PhysicalDeviceVulkan13Features(vk::PhysicalDeviceVulkan13Features<'a>),
 }
 
-impl<'a, T> From<T> for GenericFeaturesPNextNode<'a>
-where T: vk::ExtendsPhysicalDeviceFeatures2 + 'a {
-    fn from(value: T) -> Self {
-        assert!(size_of::<T>() <= size_of::<Self>());
-        let mut this = GenericFeaturesPNextNode {
-            s_type: vk::StructureType::from_raw(0),
-            p_next: std::ptr::null_mut(),
-            fields: [0; 256],
-            _marker: PhantomData
-        };
-        let size = size_of::<T>();
-        unsafe {
-            std::ptr::copy_nonoverlapping(
-                &value as *const T as *const u8,
-                &mut this as *mut Self as *mut u8,
-                size,
-            );
+fn match_features(
+    requested: &VulkanPhysicalDeviceFeature2<'_>,
+    supported: &VulkanPhysicalDeviceFeature2<'_>,
+) -> bool {
+    assert_eq!(requested.s_type(), supported.s_type());
+
+    match (requested, supported) {
+        (
+            VulkanPhysicalDeviceFeature2::PhysicalDeviceVulkan11Features(r),
+            VulkanPhysicalDeviceFeature2::PhysicalDeviceVulkan11Features(s),
+        ) => {
+            if r.storage_buffer16_bit_access == vk::TRUE
+                && s.storage_buffer16_bit_access == vk::FALSE
+            {
+                return false;
+            }
+            if r.uniform_and_storage_buffer16_bit_access == vk::TRUE
+                && s.uniform_and_storage_buffer16_bit_access == vk::FALSE
+            {
+                return false;
+            }
+            if r.storage_push_constant16 == vk::TRUE && s.storage_push_constant16 == vk::FALSE {
+                return false;
+            }
+            if r.storage_input_output16 == vk::TRUE && s.storage_input_output16 == vk::FALSE {
+                return false;
+            }
+            if r.multiview == vk::TRUE && s.multiview == vk::FALSE {
+                return false;
+            }
+            if r.multiview_geometry_shader == vk::TRUE && s.multiview_geometry_shader == vk::FALSE {
+                return false;
+            }
+            if r.multiview_tessellation_shader == vk::TRUE
+                && s.multiview_tessellation_shader == vk::FALSE
+            {
+                return false;
+            }
+            if r.variable_pointers_storage_buffer == vk::TRUE
+                && s.variable_pointers_storage_buffer == vk::FALSE
+            {
+                return false;
+            }
+            if r.variable_pointers == vk::TRUE && s.variable_pointers == vk::FALSE {
+                return false;
+            }
+            if r.protected_memory == vk::TRUE && s.protected_memory == vk::FALSE {
+                return false;
+            }
+            if r.sampler_ycbcr_conversion == vk::TRUE && s.sampler_ycbcr_conversion == vk::FALSE {
+                return false;
+            }
+            if r.shader_draw_parameters == vk::TRUE && s.shader_draw_parameters == vk::FALSE {
+                return false;
+            }
+            true
         }
-        this
+        (
+            VulkanPhysicalDeviceFeature2::PhysicalDeviceVulkan12Features(r),
+            VulkanPhysicalDeviceFeature2::PhysicalDeviceVulkan12Features(s),
+        ) => {
+            if r.sampler_mirror_clamp_to_edge == vk::TRUE
+                && s.sampler_mirror_clamp_to_edge == vk::FALSE
+            {
+                return false;
+            }
+            if r.draw_indirect_count == vk::TRUE && s.draw_indirect_count == vk::FALSE {
+                return false;
+            }
+            if r.storage_buffer8_bit_access == vk::TRUE && s.storage_buffer8_bit_access == vk::FALSE
+            {
+                return false;
+            }
+            if r.uniform_and_storage_buffer8_bit_access == vk::TRUE
+                && s.uniform_and_storage_buffer8_bit_access == vk::FALSE
+            {
+                return false;
+            }
+            if r.storage_push_constant8 == vk::TRUE && s.storage_push_constant8 == vk::FALSE {
+                return false;
+            }
+            if r.shader_buffer_int64_atomics == vk::TRUE
+                && s.shader_buffer_int64_atomics == vk::FALSE
+            {
+                return false;
+            }
+            if r.shader_shared_int64_atomics == vk::TRUE
+                && s.shader_shared_int64_atomics == vk::FALSE
+            {
+                return false;
+            }
+            if r.shader_float16 == vk::TRUE && s.shader_float16 == vk::FALSE {
+                return false;
+            }
+            if r.shader_int8 == vk::TRUE && s.shader_int8 == vk::FALSE {
+                return false;
+            }
+            if r.descriptor_indexing == vk::TRUE && s.descriptor_indexing == vk::FALSE {
+                return false;
+            }
+            if r.shader_input_attachment_array_dynamic_indexing == vk::TRUE
+                && s.shader_input_attachment_array_dynamic_indexing == vk::FALSE
+            {
+                return false;
+            }
+            if r.shader_uniform_texel_buffer_array_dynamic_indexing == vk::TRUE
+                && s.shader_uniform_texel_buffer_array_dynamic_indexing == vk::FALSE
+            {
+                return false;
+            }
+            if r.shader_storage_texel_buffer_array_dynamic_indexing == vk::TRUE
+                && s.shader_storage_texel_buffer_array_dynamic_indexing == vk::FALSE
+            {
+                return false;
+            }
+            if r.shader_uniform_buffer_array_non_uniform_indexing == vk::TRUE
+                && s.shader_uniform_buffer_array_non_uniform_indexing == vk::FALSE
+            {
+                return false;
+            }
+            if r.shader_sampled_image_array_non_uniform_indexing == vk::TRUE
+                && s.shader_sampled_image_array_non_uniform_indexing == vk::FALSE
+            {
+                return false;
+            }
+            if r.shader_storage_buffer_array_non_uniform_indexing == vk::TRUE
+                && s.shader_storage_buffer_array_non_uniform_indexing == vk::FALSE
+            {
+                return false;
+            }
+            if r.shader_storage_image_array_non_uniform_indexing == vk::TRUE
+                && s.shader_storage_image_array_non_uniform_indexing == vk::FALSE
+            {
+                return false;
+            }
+            if r.shader_input_attachment_array_non_uniform_indexing == vk::TRUE
+                && s.shader_input_attachment_array_non_uniform_indexing == vk::FALSE
+            {
+                return false;
+            }
+            if r.shader_uniform_texel_buffer_array_non_uniform_indexing == vk::TRUE
+                && s.shader_uniform_texel_buffer_array_non_uniform_indexing == vk::FALSE
+            {
+                return false;
+            }
+            if r.shader_storage_texel_buffer_array_non_uniform_indexing == vk::TRUE
+                && s.shader_storage_texel_buffer_array_non_uniform_indexing == vk::FALSE
+            {
+                return false;
+            }
+            if r.descriptor_binding_uniform_buffer_update_after_bind == vk::TRUE
+                && s.descriptor_binding_uniform_buffer_update_after_bind == vk::FALSE
+            {
+                return false;
+            }
+            if r.descriptor_binding_sampled_image_update_after_bind == vk::TRUE
+                && s.descriptor_binding_sampled_image_update_after_bind == vk::FALSE
+            {
+                return false;
+            }
+            if r.descriptor_binding_storage_image_update_after_bind == vk::TRUE
+                && s.descriptor_binding_storage_image_update_after_bind == vk::FALSE
+            {
+                return false;
+            }
+            if r.descriptor_binding_storage_buffer_update_after_bind == vk::TRUE
+                && s.descriptor_binding_storage_buffer_update_after_bind == vk::FALSE
+            {
+                return false;
+            }
+            if r.descriptor_binding_uniform_texel_buffer_update_after_bind == vk::TRUE
+                && s.descriptor_binding_uniform_texel_buffer_update_after_bind == vk::FALSE
+            {
+                return false;
+            }
+            if r.descriptor_binding_storage_texel_buffer_update_after_bind == vk::TRUE
+                && s.descriptor_binding_storage_texel_buffer_update_after_bind == vk::FALSE
+            {
+                return false;
+            }
+            if r.descriptor_binding_update_unused_while_pending == vk::TRUE
+                && s.descriptor_binding_update_unused_while_pending == vk::FALSE
+            {
+                return false;
+            }
+            if r.descriptor_binding_partially_bound == vk::TRUE
+                && s.descriptor_binding_partially_bound == vk::FALSE
+            {
+                return false;
+            }
+            if r.descriptor_binding_variable_descriptor_count == vk::TRUE
+                && s.descriptor_binding_variable_descriptor_count == vk::FALSE
+            {
+                return false;
+            }
+            if r.runtime_descriptor_array == vk::TRUE && s.runtime_descriptor_array == vk::FALSE {
+                return false;
+            }
+            if r.sampler_filter_minmax == vk::TRUE && s.sampler_filter_minmax == vk::FALSE {
+                return false;
+            }
+            if r.scalar_block_layout == vk::TRUE && s.scalar_block_layout == vk::FALSE {
+                return false;
+            }
+            if r.imageless_framebuffer == vk::TRUE && s.imageless_framebuffer == vk::FALSE {
+                return false;
+            }
+            if r.uniform_buffer_standard_layout == vk::TRUE
+                && s.uniform_buffer_standard_layout == vk::FALSE
+            {
+                return false;
+            }
+            if r.shader_subgroup_extended_types == vk::TRUE
+                && s.shader_subgroup_extended_types == vk::FALSE
+            {
+                return false;
+            }
+            if r.separate_depth_stencil_layouts == vk::TRUE
+                && s.separate_depth_stencil_layouts == vk::FALSE
+            {
+                return false;
+            }
+            if r.host_query_reset == vk::TRUE && s.host_query_reset == vk::FALSE {
+                return false;
+            }
+            if r.timeline_semaphore == vk::TRUE && s.timeline_semaphore == vk::FALSE {
+                return false;
+            }
+            if r.buffer_device_address == vk::TRUE && s.buffer_device_address == vk::FALSE {
+                return false;
+            }
+            if r.buffer_device_address_capture_replay == vk::TRUE
+                && s.buffer_device_address_capture_replay == vk::FALSE
+            {
+                return false;
+            }
+            if r.buffer_device_address_multi_device == vk::TRUE
+                && s.buffer_device_address_multi_device == vk::FALSE
+            {
+                return false;
+            }
+            if r.vulkan_memory_model == vk::TRUE && s.vulkan_memory_model == vk::FALSE {
+                return false;
+            }
+            if r.vulkan_memory_model_device_scope == vk::TRUE
+                && s.vulkan_memory_model_device_scope == vk::FALSE
+            {
+                return false;
+            }
+            if r.vulkan_memory_model_availability_visibility_chains == vk::TRUE
+                && s.vulkan_memory_model_availability_visibility_chains == vk::FALSE
+            {
+                return false;
+            }
+            if r.shader_output_viewport_index == vk::TRUE
+                && s.shader_output_viewport_index == vk::FALSE
+            {
+                return false;
+            }
+            if r.shader_output_layer == vk::TRUE && s.shader_output_layer == vk::FALSE {
+                return false;
+            }
+            if r.subgroup_broadcast_dynamic_id == vk::TRUE
+                && s.subgroup_broadcast_dynamic_id == vk::FALSE
+            {
+                return false;
+            }
+            true
+        }
+        (
+            VulkanPhysicalDeviceFeature2::PhysicalDeviceVulkan13Features(r),
+            VulkanPhysicalDeviceFeature2::PhysicalDeviceVulkan13Features(s),
+        ) => {
+            if r.robust_image_access == vk::TRUE && s.robust_image_access == vk::FALSE {
+                return false;
+            }
+            if r.inline_uniform_block == vk::TRUE && s.inline_uniform_block == vk::FALSE {
+                return false;
+            }
+            if r.descriptor_binding_inline_uniform_block_update_after_bind == vk::TRUE
+                && s.descriptor_binding_inline_uniform_block_update_after_bind == vk::FALSE
+            {
+                return false;
+            }
+            if r.pipeline_creation_cache_control == vk::TRUE
+                && s.pipeline_creation_cache_control == vk::FALSE
+            {
+                return false;
+            }
+            if r.private_data == vk::TRUE && s.private_data == vk::FALSE {
+                return false;
+            }
+            if r.shader_demote_to_helper_invocation == vk::TRUE
+                && s.shader_demote_to_helper_invocation == vk::FALSE
+            {
+                return false;
+            }
+            if r.shader_terminate_invocation == vk::TRUE
+                && s.shader_terminate_invocation == vk::FALSE
+            {
+                return false;
+            }
+            if r.subgroup_size_control == vk::TRUE && s.subgroup_size_control == vk::FALSE {
+                return false;
+            }
+            if r.compute_full_subgroups == vk::TRUE && s.compute_full_subgroups == vk::FALSE {
+                return false;
+            }
+            if r.synchronization2 == vk::TRUE && s.synchronization2 == vk::FALSE {
+                return false;
+            }
+            if r.texture_compression_astc_hdr == vk::TRUE
+                && s.texture_compression_astc_hdr == vk::FALSE
+            {
+                return false;
+            }
+            if r.shader_zero_initialize_workgroup_memory == vk::TRUE
+                && s.shader_zero_initialize_workgroup_memory == vk::FALSE
+            {
+                return false;
+            }
+            if r.dynamic_rendering == vk::TRUE && s.dynamic_rendering == vk::FALSE {
+                return false;
+            }
+            if r.shader_integer_dot_product == vk::TRUE && s.shader_integer_dot_product == vk::FALSE
+            {
+                return false;
+            }
+            if r.maintenance4 == vk::TRUE && s.maintenance4 == vk::FALSE {
+                return false;
+            }
+            true
+        },
+        _ => unsafe { unreachable_unchecked() }
     }
 }
+impl<'a> VulkanPhysicalDeviceFeature2<'a> {
+    fn as_mut(&mut self) -> &mut dyn vk::ExtendsPhysicalDeviceFeatures2 {
+        match self {
+            Self::PhysicalDeviceVulkan11Features(f) => f,
+            Self::PhysicalDeviceVulkan12Features(f) => f,
+            Self::PhysicalDeviceVulkan13Features(f) => f,
+        }
+    }
+
+    fn combine(&mut self, other: &VulkanPhysicalDeviceFeature2<'a>) {
+        assert_eq!(self.s_type(), other.s_type());
+
+        match (self, other) {
+            (
+                Self::PhysicalDeviceVulkan11Features(f),
+                VulkanPhysicalDeviceFeature2::PhysicalDeviceVulkan11Features(other),
+            ) => {
+                f.storage_buffer16_bit_access |= other.storage_buffer16_bit_access;
+                f.uniform_and_storage_buffer16_bit_access |=
+                    other.uniform_and_storage_buffer16_bit_access;
+                f.storage_push_constant16 |= other.storage_push_constant16;
+                f.storage_input_output16 |= other.storage_input_output16;
+                f.multiview |= other.multiview;
+                f.multiview_geometry_shader |= other.multiview_geometry_shader;
+                f.multiview_tessellation_shader |= other.multiview_tessellation_shader;
+                f.variable_pointers_storage_buffer |= other.variable_pointers_storage_buffer;
+                f.variable_pointers |= other.variable_pointers;
+                f.protected_memory |= other.protected_memory;
+                f.sampler_ycbcr_conversion |= other.sampler_ycbcr_conversion;
+                f.shader_draw_parameters |= other.shader_draw_parameters;
+            }
+            (
+                Self::PhysicalDeviceVulkan12Features(f),
+                VulkanPhysicalDeviceFeature2::PhysicalDeviceVulkan12Features(other),
+            ) => {
+                f.sampler_mirror_clamp_to_edge |= other.sampler_mirror_clamp_to_edge;
+                f.draw_indirect_count |= other.draw_indirect_count;
+                f.storage_buffer8_bit_access |= other.storage_buffer8_bit_access;
+                f.uniform_and_storage_buffer8_bit_access |=
+                    other.uniform_and_storage_buffer8_bit_access;
+                f.storage_push_constant8 |= other.storage_push_constant8;
+                f.shader_buffer_int64_atomics |= other.shader_buffer_int64_atomics;
+                f.shader_shared_int64_atomics |= other.shader_shared_int64_atomics;
+                f.shader_float16 |= other.shader_float16;
+                f.shader_int8 |= other.shader_int8;
+                f.descriptor_indexing |= other.descriptor_indexing;
+                f.shader_input_attachment_array_dynamic_indexing |=
+                    other.shader_input_attachment_array_dynamic_indexing;
+                f.shader_uniform_texel_buffer_array_dynamic_indexing |=
+                    other.shader_uniform_texel_buffer_array_dynamic_indexing;
+                f.shader_storage_texel_buffer_array_dynamic_indexing |=
+                    other.shader_storage_texel_buffer_array_dynamic_indexing;
+                f.shader_uniform_buffer_array_non_uniform_indexing |=
+                    other.shader_uniform_buffer_array_non_uniform_indexing;
+                f.shader_sampled_image_array_non_uniform_indexing |=
+                    other.shader_sampled_image_array_non_uniform_indexing;
+                f.shader_storage_buffer_array_non_uniform_indexing |=
+                    other.shader_storage_buffer_array_non_uniform_indexing;
+                f.shader_storage_image_array_non_uniform_indexing |=
+                    other.shader_storage_image_array_non_uniform_indexing;
+                f.shader_input_attachment_array_non_uniform_indexing |=
+                    other.shader_input_attachment_array_non_uniform_indexing;
+                f.shader_uniform_texel_buffer_array_non_uniform_indexing |=
+                    other.shader_uniform_texel_buffer_array_non_uniform_indexing;
+                f.shader_storage_texel_buffer_array_non_uniform_indexing |=
+                    other.shader_storage_texel_buffer_array_non_uniform_indexing;
+                f.descriptor_binding_uniform_buffer_update_after_bind |=
+                    other.descriptor_binding_uniform_buffer_update_after_bind;
+                f.descriptor_binding_sampled_image_update_after_bind |=
+                    other.descriptor_binding_sampled_image_update_after_bind;
+                f.descriptor_binding_storage_image_update_after_bind |=
+                    other.descriptor_binding_storage_image_update_after_bind;
+                f.descriptor_binding_storage_buffer_update_after_bind |=
+                    other.descriptor_binding_storage_buffer_update_after_bind;
+                f.descriptor_binding_uniform_texel_buffer_update_after_bind |=
+                    other.descriptor_binding_uniform_texel_buffer_update_after_bind;
+                f.descriptor_binding_storage_texel_buffer_update_after_bind |=
+                    other.descriptor_binding_storage_texel_buffer_update_after_bind;
+                f.descriptor_binding_update_unused_while_pending |=
+                    other.descriptor_binding_update_unused_while_pending;
+                f.descriptor_binding_partially_bound |= other.descriptor_binding_partially_bound;
+                f.descriptor_binding_variable_descriptor_count |=
+                    other.descriptor_binding_variable_descriptor_count;
+                f.runtime_descriptor_array |= other.runtime_descriptor_array;
+                f.sampler_filter_minmax |= other.sampler_filter_minmax;
+                f.scalar_block_layout |= other.scalar_block_layout;
+                f.imageless_framebuffer |= other.imageless_framebuffer;
+                f.uniform_buffer_standard_layout |= other.uniform_buffer_standard_layout;
+                f.shader_subgroup_extended_types |= other.shader_subgroup_extended_types;
+                f.separate_depth_stencil_layouts |= other.separate_depth_stencil_layouts;
+                f.host_query_reset |= other.host_query_reset;
+                f.timeline_semaphore |= other.timeline_semaphore;
+                f.buffer_device_address |= other.buffer_device_address;
+                f.buffer_device_address_capture_replay |=
+                    other.buffer_device_address_capture_replay;
+                f.buffer_device_address_multi_device |= other.buffer_device_address_multi_device;
+                f.vulkan_memory_model |= other.vulkan_memory_model;
+                f.vulkan_memory_model_device_scope |= other.vulkan_memory_model_device_scope;
+                f.vulkan_memory_model_availability_visibility_chains |=
+                    other.vulkan_memory_model_availability_visibility_chains;
+                f.shader_output_viewport_index |= other.shader_output_viewport_index;
+                f.shader_output_layer |= other.shader_output_layer;
+                f.subgroup_broadcast_dynamic_id |= other.subgroup_broadcast_dynamic_id;
+            }
+            (
+                Self::PhysicalDeviceVulkan13Features(f),
+                VulkanPhysicalDeviceFeature2::PhysicalDeviceVulkan13Features(other),
+            ) => {
+                f.robust_image_access |= other.robust_image_access;
+                f.inline_uniform_block |= other.inline_uniform_block;
+                f.descriptor_binding_inline_uniform_block_update_after_bind |=
+                    other.descriptor_binding_inline_uniform_block_update_after_bind;
+                f.pipeline_creation_cache_control |= other.pipeline_creation_cache_control;
+                f.private_data |= other.private_data;
+                f.shader_demote_to_helper_invocation |= other.shader_demote_to_helper_invocation;
+                f.shader_terminate_invocation |= other.shader_terminate_invocation;
+                f.subgroup_size_control |= other.subgroup_size_control;
+                f.compute_full_subgroups |= other.compute_full_subgroups;
+                f.synchronization2 |= other.synchronization2;
+                f.texture_compression_astc_hdr |= other.texture_compression_astc_hdr;
+                f.shader_zero_initialize_workgroup_memory |=
+                    other.shader_zero_initialize_workgroup_memory;
+                f.dynamic_rendering |= other.dynamic_rendering;
+                f.shader_integer_dot_product |= other.shader_integer_dot_product;
+                f.maintenance4 |= other.maintenance4;
+            }
+            _ => unsafe { unreachable_unchecked() },
+        }
+    }
+
+    fn s_type(&self) -> vk::StructureType {
+        match self {
+            Self::PhysicalDeviceVulkan11Features(f) => f.s_type,
+            Self::PhysicalDeviceVulkan12Features(f) => f.s_type,
+            Self::PhysicalDeviceVulkan13Features(f) => f.s_type,
+        }
+    }
+}
+
+impl<'a> From<vk::PhysicalDeviceVulkan11Features<'a>> for VulkanPhysicalDeviceFeature2<'a> {
+    fn from(value: vk::PhysicalDeviceVulkan11Features<'a>) -> Self {
+        Self::PhysicalDeviceVulkan11Features(value)
+    }
+}
+
+impl<'a> From<vk::PhysicalDeviceVulkan12Features<'a>> for VulkanPhysicalDeviceFeature2<'a> {
+    fn from(value: vk::PhysicalDeviceVulkan12Features<'a>) -> Self {
+        Self::PhysicalDeviceVulkan12Features(value)
+    }
+}
+
+impl<'a> From<vk::PhysicalDeviceVulkan13Features<'a>> for VulkanPhysicalDeviceFeature2<'a> {
+    fn from(value: vk::PhysicalDeviceVulkan13Features<'a>) -> Self {
+        Self::PhysicalDeviceVulkan13Features(value)
+    }
+}
+//endregion vulkanfeatures
 
 #[derive(Debug, Clone, Default)]
 struct GenericFeatureChain<'a> {
-    nodes: Vec<GenericFeaturesPNextNode<'a>>,
+    nodes: Vec<VulkanPhysicalDeviceFeature2<'a>>,
 }
 
 impl<'a> Deref for GenericFeatureChain<'a> {
-    type Target = Vec<GenericFeaturesPNextNode<'a>>;
+    type Target = Vec<VulkanPhysicalDeviceFeature2<'a>>;
 
     fn deref(&self) -> &Self::Target {
         &self.nodes
@@ -331,20 +795,19 @@ impl<'a> Deref for GenericFeatureChain<'a> {
 
 impl<'a> GenericFeatureChain<'a> {
     fn new() -> Self {
-        Self {
-            nodes: vec![]
-        }
+        Self { nodes: vec![] }
     }
 
-    fn add(&mut self, feature: impl vk::ExtendsPhysicalDeviceFeatures2 + 'a) {
-        let new_node = GenericFeaturesPNextNode::from(feature);
+    fn add(&mut self, feature: impl Into<VulkanPhysicalDeviceFeature2<'a>> + 'a)
+    {
+        let new_node = feature.into();
 
         for node in &mut self.nodes {
-            if new_node.s_type == node.s_type {
+            if new_node.s_type() == node.s_type() {
                 node.combine(&new_node);
                 return;
             }
-        };
+        }
 
         self.nodes.push(new_node);
     }
@@ -358,45 +821,14 @@ impl<'a> GenericFeatureChain<'a> {
         let features = self.nodes.as_slice();
 
         for (requested_node, node) in features_requested.iter().zip(features) {
-            if !match_node(requested_node, node) {
+            if !match_features(requested_node, node) {
                 return false;
             }
-        };
+        }
 
         true
     }
-
-    fn chain_up(&mut self, features: &mut vk::PhysicalDeviceFeatures2) {
-        let mut prev = std::ptr::null_mut::<GenericFeaturesPNextNode>();
-        for extension in self.nodes.iter_mut() {
-            if !prev.is_null() {
-                unsafe { (*prev).p_next = extension as *mut GenericFeaturesPNextNode as _ };
-            }
-            prev = extension as *mut GenericFeaturesPNextNode;
-        }
-        features.p_next = if !self.nodes.is_empty() {
-            <*mut GenericFeaturesPNextNode>::cast(self.nodes.get_mut(0).unwrap()) as _
-        } else {
-            std::ptr::null_mut()
-        };
-    }
 }
-
-fn match_node(requested: &GenericFeaturesPNextNode, supported: &GenericFeaturesPNextNode) -> bool {
-    assert_eq!(requested.s_type, supported.s_type);
-
-    for i in 0..GenericFeaturesPNextNode::FIELD_CAPACITY {
-        if requested.fields[i] == vk::TRUE && supported.fields[i] == vk::FALSE {
-            return false
-        }
-    }
-
-    true
-}
-
-pub trait Feature2: vk::ExtendsPhysicalDeviceFeatures2 + Debug {}
-
-impl<T> Feature2 for T where T: vk::ExtendsPhysicalDeviceFeatures2 + Debug {}
 
 #[derive(Debug)]
 struct SelectionCriteria<'a> {
@@ -462,9 +894,7 @@ pub struct PhysicalDeviceSelector<'a> {
 }
 
 impl<'a> PhysicalDeviceSelector<'a> {
-    pub fn new(
-        instance: &'a Instance<'a>,
-    ) -> PhysicalDeviceSelector<'a> {
+    pub fn new(instance: &'a Instance<'a>) -> PhysicalDeviceSelector<'a> {
         let enable_portability_subset = cfg!(feature = "portability");
         Self {
             instance_info: PhysicalDeviceInstanceInfo {
@@ -489,8 +919,14 @@ impl<'a> PhysicalDeviceSelector<'a> {
         self
     }
 
-    pub fn add_required_extension_feature<T: vk::ExtendsPhysicalDeviceFeatures2 + 'a>(mut self, feature: T) -> Self {
-        self.selection_criteria.requested_features_chain.borrow_mut().add(feature);
+    pub fn add_required_extension_feature<T: Into<VulkanPhysicalDeviceFeature2<'a>> + 'a>(
+        mut self,
+        feature: T,
+    ) -> Self {
+        self.selection_criteria
+            .requested_features_chain
+            .borrow_mut()
+            .add(feature);
         self
     }
 
@@ -542,12 +978,13 @@ impl<'a> PhysicalDeviceSelector<'a> {
     fn set_is_suitable(&self, device: &mut PhysicalDevice) {
         let criteria = &self.selection_criteria;
 
-        if !criteria.name.is_empty() && Cow::Borrowed(&criteria.name)
-            != device
-                .properties
-                .device_name_as_c_str()
-                .expect("device name should be correct cstr")
-                .to_string_lossy()
+        if !criteria.name.is_empty()
+            && Cow::Borrowed(&criteria.name)
+                != device
+                    .properties
+                    .device_name_as_c_str()
+                    .expect("device name should be correct cstr")
+                    .to_string_lossy()
         {
             device.suitable = Suitable::No;
             return;
@@ -586,7 +1023,7 @@ impl<'a> PhysicalDeviceSelector<'a> {
             self.instance_info.surface_instance,
             &device.physical_device,
             self.instance_info.surface,
-            &device.queue_families
+            &device.queue_families,
         );
 
         if criteria.require_dedicated_compute_queue && dedicated_compute.is_none() {
@@ -609,14 +1046,17 @@ impl<'a> PhysicalDeviceSelector<'a> {
             return;
         }
 
-        if criteria.require_present && present_queue.is_none() && !criteria.defer_surface_initialization {
+        if criteria.require_present
+            && present_queue.is_none()
+            && !criteria.defer_surface_initialization
+        {
             device.suitable = Suitable::No;
             return;
         }
 
         let required_extensions_supported = check_device_extension_support(
             &device.available_extensions,
-            &criteria.required_extensions
+            &criteria.required_extensions,
         );
 
         if required_extensions_supported.len() != criteria.required_extensions.len() {
@@ -625,14 +1065,24 @@ impl<'a> PhysicalDeviceSelector<'a> {
         }
 
         if !criteria.defer_surface_initialization && criteria.require_present {
-            if let Some((surface_instance, surface)) = self.instance_info.surface_instance.zip(self.instance_info.surface) {
-                let formats = unsafe { surface_instance.get_physical_device_surface_formats(device.physical_device, surface) };
+            if let Some((surface_instance, surface)) = self
+                .instance_info
+                .surface_instance
+                .zip(self.instance_info.surface)
+            {
+                let formats = unsafe {
+                    surface_instance
+                        .get_physical_device_surface_formats(device.physical_device, surface)
+                };
                 let Ok(formats) = formats else {
                     device.suitable = Suitable::No;
                     return;
                 };
 
-                let present_modes = unsafe { surface_instance.get_physical_device_surface_present_modes(device.physical_device, surface) };
+                let present_modes = unsafe {
+                    surface_instance
+                        .get_physical_device_surface_present_modes(device.physical_device, surface)
+                };
                 let Ok(present_modes) = present_modes else {
                     device.suitable = Suitable::No;
                     return;
@@ -645,7 +1095,8 @@ impl<'a> PhysicalDeviceSelector<'a> {
             };
         };
 
-        let preferred_device_type = vk::PhysicalDeviceType::from_raw(criteria.preferred_device_type as u8 as i32);
+        let preferred_device_type =
+            vk::PhysicalDeviceType::from_raw(criteria.preferred_device_type as u8 as i32);
         if !criteria.allow_any_type && device.properties.device_type != preferred_device_type {
             device.suitable = Suitable::Partial;
         }
@@ -654,7 +1105,7 @@ impl<'a> PhysicalDeviceSelector<'a> {
             &device.features,
             &criteria.required_features,
             &device.supported_features_chain,
-            &criteria.requested_features_chain.borrow()
+            &criteria.requested_features_chain.borrow(),
         );
         if !required_features_supported {
             device.suitable = Suitable::No;
@@ -662,7 +1113,10 @@ impl<'a> PhysicalDeviceSelector<'a> {
         }
 
         for memory_heap in device.memory_properties.memory_heaps {
-            if memory_heap.flags.contains(vk::MemoryHeapFlags::DEVICE_LOCAL) {
+            if memory_heap
+                .flags
+                .contains(vk::MemoryHeapFlags::DEVICE_LOCAL)
+            {
                 if memory_heap.size < criteria.required_mem_size {
                     device.suitable = Suitable::No;
                     return;
@@ -735,25 +1189,35 @@ impl<'a> PhysicalDeviceSelector<'a> {
             })
             .collect::<BTreeSet<_>>();
 
-        physical_device
-            .available_extensions
-            .extend(available_extensions_names.iter().map(|s| Cow::Owned(s.clone())));
+        physical_device.available_extensions.extend(
+            available_extensions_names
+                .iter()
+                .map(|s| Cow::Owned(s.clone())),
+        );
 
         physical_device.properties2_ext_enabled = instance_info.properties2_ext_enabled;
 
-        let mut requested_features_chain_clone = criteria.requested_features_chain.clone();
+        let mut requested_features_chain = criteria.requested_features_chain.borrow();
         let instance_is_11 = instance_info.version >= vk::API_VERSION_1_1;
-        if !requested_features_chain_clone.borrow().is_empty() && (instance_is_11 || instance_info.properties2_ext_enabled) {
+        if !requested_features_chain.is_empty()
+            && (instance_is_11 || instance_info.properties2_ext_enabled)
+        {
+            let mut supported_features = requested_features_chain.clone();
             let mut local_features = vk::PhysicalDeviceFeatures2::default();
 
-            {
-                let mut supported_features_chain = requested_features_chain_clone.borrow_mut();
-                supported_features_chain.chain_up(&mut local_features);
+            for node in supported_features.nodes.iter_mut() {
+                local_features = local_features
+                    .push_next(node.as_mut());
             }
 
-            unsafe { instance_info.instance.get_physical_device_features2(physical_device.physical_device, &mut local_features) };
+            unsafe {
+                instance_info.instance.get_physical_device_features2(
+                    physical_device.physical_device,
+                    &mut local_features,
+                )
+            };
 
-            physical_device.supported_features_chain = requested_features_chain_clone.into_inner();
+            physical_device.supported_features_chain = supported_features.clone();
         }
 
         Ok(physical_device)
@@ -778,8 +1242,7 @@ impl<'a> PhysicalDeviceSelector<'a> {
         let fill_out_phys_dev_with_criteria = |physical_device: &mut PhysicalDevice| {
             physical_device.features = criteria.required_features;
             let mut portability_ext_available = false;
-            let portability_name = vk::KHR_PORTABILITY_SUBSET_NAME
-                .to_string_lossy();
+            let portability_name = vk::KHR_PORTABILITY_SUBSET_NAME.to_string_lossy();
             for ext in &physical_device.available_extensions {
                 if criteria.enable_portability_subset && ext == &portability_name {
                     portability_ext_available = true;
@@ -787,9 +1250,12 @@ impl<'a> PhysicalDeviceSelector<'a> {
             }
 
             physical_device.extensions_to_enable.clear();
-            physical_device
-                .extensions_to_enable
-                .extend(criteria.required_extensions.iter().map(|s| Cow::Owned(s.clone())));
+            physical_device.extensions_to_enable.extend(
+                criteria
+                    .required_extensions
+                    .iter()
+                    .map(|s| Cow::Owned(s.clone())),
+            );
 
             if portability_ext_available {
                 physical_device
@@ -804,25 +1270,28 @@ impl<'a> PhysicalDeviceSelector<'a> {
             return Ok(BTreeSet::from([device]));
         };
 
-        let physical_devices = physical_devices.into_iter().filter_map(|p| {
-            let mut phys_dev = self.populate_device_details(p).ok();
+        let physical_devices = physical_devices
+            .into_iter()
+            .filter_map(|p| {
+                let mut phys_dev = self.populate_device_details(p).ok();
 
-            if let Some(phys_dev) = phys_dev.as_mut() {
-                self.set_is_suitable(phys_dev);
-            }
-
-            phys_dev.and_then(|mut phys_dev| {
-                if phys_dev.suitable == Suitable::No {
-                    None
-                } else {
-                    fill_out_phys_dev_with_criteria(&mut phys_dev);
-
-                    println!("AVAILABLE: {:#?}", phys_dev.supported_features_chain);
-                    println!("REQUESTED: {:#?}", criteria.requested_features_chain);
-                    Some(phys_dev)
+                if let Some(phys_dev) = phys_dev.as_mut() {
+                    self.set_is_suitable(phys_dev);
                 }
+
+                phys_dev.and_then(|mut phys_dev| {
+                    if phys_dev.suitable == Suitable::No {
+                        None
+                    } else {
+                        fill_out_phys_dev_with_criteria(&mut phys_dev);
+
+                        println!("AVAILABLE: {:#?}", phys_dev.supported_features_chain);
+                        println!("REQUESTED: {:#?}", criteria.requested_features_chain);
+                        Some(phys_dev)
+                    }
+                })
             })
-        }).collect::<BTreeSet<_>>();
+            .collect::<BTreeSet<_>>();
 
         Ok(physical_devices)
     }
@@ -867,11 +1336,14 @@ pub struct DeviceBuilder<'a> {
 }
 
 impl<'a> DeviceBuilder<'a> {
-    pub fn new(physical_device: &'a PhysicalDevice<'a>, instance: &'a Instance<'a>) -> DeviceBuilder<'a> {
+    pub fn new(
+        physical_device: &'a PhysicalDevice<'a>,
+        instance: &'a Instance<'a>,
+    ) -> DeviceBuilder<'a> {
         Self {
             physical_device,
             allocation_callbacks: None,
-            instance
+            instance,
         }
     }
 
@@ -883,7 +1355,13 @@ impl<'a> DeviceBuilder<'a> {
     pub fn build(self) -> crate::Result<Device<'a>> {
         // TODO: custom queue setup
         // (index, priorities)
-        let queue_descriptions = self.physical_device.queue_families.iter().enumerate().map(|(index, _)| (index, [1.])).collect::<Vec<_>>();
+        let queue_descriptions = self
+            .physical_device
+            .queue_families
+            .iter()
+            .enumerate()
+            .map(|(index, _)| (index, [1.]))
+            .collect::<Vec<_>>();
 
         let queue_create_infos = queue_descriptions
             .iter()
@@ -894,10 +1372,20 @@ impl<'a> DeviceBuilder<'a> {
                 queue_create_info
             })
             .collect::<Vec<_>>();
-        let extensions_to_enable = self.physical_device.extensions_to_enable.iter().map(|e| cow_to_c_cow(e.clone())).collect::<Vec<_>>();
+        let extensions_to_enable = self
+            .physical_device
+            .extensions_to_enable
+            .iter()
+            .map(|e| cow_to_c_cow(e.clone()))
+            .collect::<Vec<_>>();
 
-        let mut extensions_to_enable = extensions_to_enable.iter().map(|e| e.as_ptr()).collect::<Vec<_>>();
-        if self.physical_device.surface.is_some() || self.physical_device.defer_surface_initialization {
+        let mut extensions_to_enable = extensions_to_enable
+            .iter()
+            .map(|e| e.as_ptr())
+            .collect::<Vec<_>>();
+        if self.physical_device.surface.is_some()
+            || self.physical_device.defer_surface_initialization
+        {
             extensions_to_enable.push(vk::KHR_SWAPCHAIN_NAME.as_ptr());
         }
 
@@ -905,10 +1393,16 @@ impl<'a> DeviceBuilder<'a> {
             .queue_create_infos(&queue_create_infos)
             .enabled_extension_names(&extensions_to_enable);
 
-        let mut device = unsafe { self.instance.as_ref().create_device(self.physical_device.physical_device, &device_create_info, self.allocation_callbacks.as_ref()) }?;
+        let mut device = unsafe {
+            self.instance.as_ref().create_device(
+                self.physical_device.physical_device,
+                &device_create_info,
+                self.allocation_callbacks.as_ref(),
+            )
+        }?;
 
         let physical_device = self.physical_device;
-        
+
         Ok(Device {
             device,
             physical_device: physical_device,
@@ -935,6 +1429,4 @@ impl<'a> AsRef<ash::Device> for Device<'a> {
     }
 }
 
-impl<'a> Device<'a> {
-
-}
+impl<'a> Device<'a> {}
