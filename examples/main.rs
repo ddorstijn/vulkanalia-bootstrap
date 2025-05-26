@@ -1,5 +1,5 @@
 use ash::{khr, vk, Entry};
-use ash_bootstrap::{DeviceBuilder, InstanceBuilder, PhysicalDeviceSelector};
+use ash_bootstrap::{DeviceBuilder, InstanceBuilder, PhysicalDeviceSelector, SwapchainBuilder};
 use raw_window_handle::{HasDisplayHandle, HasWindowHandle};
 use std::ffi::c_void;
 use std::rc::Rc;
@@ -32,7 +32,6 @@ impl ApplicationHandler for App {
             window.display_handle().unwrap(),
         )))
         .request_validation_layers(true)
-        .headless(true)
         .app_name("test")
         .engine_name("xolaani")
         .use_default_tracing_messenger()
@@ -40,7 +39,8 @@ impl ApplicationHandler for App {
             vk::DebugUtilsMessageSeverityFlagsEXT::VERBOSE
                 | vk::DebugUtilsMessageSeverityFlagsEXT::INFO,
         )
-        .minimum_instance_version(vk::make_api_version(0, 1, 3, 0))
+            .require_api_version(vk::API_VERSION_1_3)
+        .minimum_instance_version(vk::API_VERSION_1_3)
         .build()
         .unwrap();
 
@@ -49,8 +49,7 @@ impl ApplicationHandler for App {
             .buffer_device_address(true)
             .timeline_semaphore(true);
 
-        let vk13_features = vk::PhysicalDeviceVulkan13Features::default()
-            .dynamic_rendering(true);
+        let vk13_features = vk::PhysicalDeviceVulkan13Features::default().dynamic_rendering(true);
 
         // let generic = GenericFeaturesPNextNode::from(vk13_features);
         // println!("generic {generic:?}");
@@ -73,7 +72,12 @@ impl ApplicationHandler for App {
             vk::KHR_MAINTENANCE2_NAME.to_string_lossy(),
         ]);
 
-        let device_builder = DeviceBuilder::new(&physical_device, &instance)
+        let device = DeviceBuilder::new(&mut physical_device, &instance)
+            .build()
+            .unwrap();
+
+        let swapchain = SwapchainBuilder::new(&instance, &device)
+            .use_default_format_selection()
             .build()
             .unwrap();
     }

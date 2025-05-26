@@ -1,3 +1,4 @@
+use ash::vk;
 use thiserror::Error;
 
 #[derive(Debug, Error)]
@@ -72,7 +73,13 @@ pub enum QueueError {
     InvalidQueueFamilyIndex,
 }
 
-#[derive(Debug, PartialOrd, PartialEq, Eq, Ord, Error)]
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) struct FormatError {
+    pub(crate) available: Vec<vk::SurfaceFormatKHR>,
+    pub(crate) desired: Vec<vk::SurfaceFormatKHR>,
+}
+
+#[derive(Debug, PartialEq, Eq, Error)]
 pub enum SwapchainError {
     #[error("Surface handle not provided")]
     SurfaceHandleNotProvided,
@@ -88,6 +95,8 @@ pub enum SwapchainError {
     RequiredMinImageCountTooLow,
     #[error("Required usage not supported")]
     RequiredUsageNotSupported,
+    #[error("No suitable desired format")]
+    NoSuitableDesiredFormat(FormatError),
 }
 
 pub type Result<T> = std::result::Result<T, Error>;

@@ -1,5 +1,8 @@
 use crate::Instance;
-use ash::vk::{AllocationCallbacks, BaseOutStructure, Bool32, PhysicalDevice16BitStorageFeatures};
+use ash::vk::{
+    AllocationCallbacks, BaseOutStructure, Bool32, PhysicalDevice16BitStorageFeatures,
+    PhysicalDeviceVulkan11Features,
+};
 use ash::{khr, vk};
 use std::borrow::Cow;
 use std::cell::RefCell;
@@ -208,6 +211,7 @@ pub struct PhysicalDevice<'a> {
     properties2_ext_enabled: bool,
     suitable: Suitable,
     supported_features_chain: GenericFeatureChain<'a>,
+    requested_features_chain: GenericFeatureChain<'a>,
 }
 
 impl Eq for PhysicalDevice<'_> {}
@@ -284,6 +288,10 @@ pub enum VulkanPhysicalDeviceFeature2<'a> {
     PhysicalDeviceVulkan12Features(vk::PhysicalDeviceVulkan12Features<'a>),
     PhysicalDeviceVulkan13Features(vk::PhysicalDeviceVulkan13Features<'a>),
 }
+
+trait Feature2: vk::ExtendsPhysicalDeviceFeatures2 + vk::ExtendsDeviceCreateInfo {}
+
+impl<T> Feature2 for T where T: vk::ExtendsPhysicalDeviceFeatures2 + vk::ExtendsDeviceCreateInfo {}
 
 fn match_features(
     requested: &VulkanPhysicalDeviceFeature2<'_>,
@@ -617,8 +625,8 @@ fn match_features(
                 return false;
             }
             true
-        },
-        _ => unsafe { unreachable_unchecked() }
+        }
+        _ => unsafe { unreachable_unchecked() },
     }
 }
 impl<'a> VulkanPhysicalDeviceFeature2<'a> {
@@ -797,8 +805,7 @@ impl<'a> GenericFeatureChain<'a> {
         Self { nodes: vec![] }
     }
 
-    fn add(&mut self, feature: impl Into<VulkanPhysicalDeviceFeature2<'a>> + 'a)
-    {
+    fn add(&mut self, feature: impl Into<VulkanPhysicalDeviceFeature2<'a>> + 'a) {
         let new_node = feature.into();
 
         for node in &mut self.nodes {
@@ -1106,6 +1113,7 @@ impl<'a> PhysicalDeviceSelector<'a> {
             &device.supported_features_chain,
             &criteria.requested_features_chain.borrow(),
         );
+
         if !required_features_supported {
             device.suitable = Suitable::No;
             return;
@@ -1157,6 +1165,7 @@ impl<'a> PhysicalDeviceSelector<'a> {
                     .get_physical_device_memory_properties(vk_phys_device)
             },
             properties2_ext_enabled: instance_info.properties2_ext_enabled,
+            requested_features_chain: criteria.requested_features_chain.clone().into_inner(),
             ..Default::default()
         };
 
@@ -1205,8 +1214,7 @@ impl<'a> PhysicalDeviceSelector<'a> {
             let mut local_features = vk::PhysicalDeviceFeatures2::default();
 
             for node in supported_features.nodes.iter_mut() {
-                local_features = local_features
-                    .push_next(node.as_mut());
+                local_features = local_features.push_next(node.as_mut());
             }
 
             unsafe {
@@ -1284,8 +1292,6 @@ impl<'a> PhysicalDeviceSelector<'a> {
                     } else {
                         fill_out_phys_dev_with_criteria(&mut phys_dev);
 
-                        println!("AVAILABLE: {:#?}", phys_dev.supported_features_chain);
-                        println!("REQUESTED: {:#?}", criteria.requested_features_chain);
                         Some(phys_dev)
                     }
                 })
@@ -1297,6 +1303,16 @@ impl<'a> PhysicalDeviceSelector<'a> {
 
     pub fn select(&'a self) -> crate::Result<PhysicalDevice<'a>> {
         let devices = self.select_devices()?;
+        #[cfg(feature = "tracing")]
+        {
+            tracing::debug!(
+                "Device suitability: {:#?}",
+                devices
+                    .iter()
+                    .map(|d| (&d.name, &d.suitable))
+                    .collect::<Vec<_>>()
+            );
+        }
 
         if devices.is_empty() {
             Err(crate::PhysicalDeviceError::NoSuitableDevice.into())
@@ -1328,7 +1344,7 @@ fn cow_to_c_cow(cow: Cow<'_, str>) -> Cow<'_, CStr> {
 
 pub struct DeviceBuilder<'a> {
     instance: &'a Instance<'a>,
-    physical_device: &'a PhysicalDevice<'a>,
+    physical_device: &'a mut PhysicalDevice<'a>,
     allocation_callbacks: Option<AllocationCallbacks<'a>>,
     // TODO: pNext chains for features
     // TODO: queue descriptions
@@ -1336,7 +1352,7 @@ pub struct DeviceBuilder<'a> {
 
 impl<'a> DeviceBuilder<'a> {
     pub fn new(
-        physical_device: &'a PhysicalDevice<'a>,
+        physical_device: &'a mut PhysicalDevice<'a>,
         instance: &'a Instance<'a>,
     ) -> DeviceBuilder<'a> {
         Self {
@@ -1351,7 +1367,7 @@ impl<'a> DeviceBuilder<'a> {
         self
     }
 
-    pub fn build(self) -> crate::Result<Device<'a>> {
+    pub fn build(mut self) -> crate::Result<Device<'a>> {
         // TODO: custom queue setup
         // (index, priorities)
         let queue_descriptions = self
@@ -1388,9 +1404,34 @@ impl<'a> DeviceBuilder<'a> {
             extensions_to_enable.push(vk::KHR_SWAPCHAIN_NAME.as_ptr());
         }
 
-        let device_create_info = vk::DeviceCreateInfo::default()
+        let mut device_create_info = vk::DeviceCreateInfo::default()
             .queue_create_infos(&queue_create_infos)
             .enabled_extension_names(&extensions_to_enable);
+
+        let mut requested_features_chain = &mut self.physical_device.requested_features_chain;
+
+        let mut features2 =
+            vk::PhysicalDeviceFeatures2::default().features(self.physical_device.features);
+
+        if self.instance.instance_version >= vk::API_VERSION_1_1
+            || self.physical_device.properties2_ext_enabled
+        {
+            device_create_info = device_create_info.push_next(&mut features2);
+
+            for node in requested_features_chain.nodes.iter_mut() {
+                match node {
+                    VulkanPhysicalDeviceFeature2::PhysicalDeviceVulkan11Features(f) => {
+                        device_create_info = device_create_info.push_next(f)
+                    }
+                    VulkanPhysicalDeviceFeature2::PhysicalDeviceVulkan12Features(f) => {
+                        device_create_info = device_create_info.push_next(f)
+                    }
+                    VulkanPhysicalDeviceFeature2::PhysicalDeviceVulkan13Features(f) => {
+                        device_create_info = device_create_info.push_next(f)
+                    }
+                }
+            }
+        }
 
         let mut device = unsafe {
             self.instance.as_ref().create_device(
@@ -1405,6 +1446,7 @@ impl<'a> DeviceBuilder<'a> {
         Ok(Device {
             device,
             physical_device: physical_device,
+            surface_instance: self.instance.surface_instance.as_ref(),
             surface: physical_device.surface,
             allocation_callbacks: self.allocation_callbacks,
             queue_families: &physical_device.queue_families,
@@ -1417,9 +1459,82 @@ pub struct Device<'a> {
     device: ash::Device,
     physical_device: &'a PhysicalDevice<'a>,
     surface: Option<vk::SurfaceKHR>,
+    surface_instance: Option<&'a khr::surface::Instance>,
     queue_families: &'a [vk::QueueFamilyProperties],
     allocation_callbacks: Option<AllocationCallbacks<'a>>,
     instance_version: u32,
+}
+
+#[derive(Debug, Clone, PartialOrd, PartialEq, Eq, Ord)]
+pub enum QueueType {
+    Present,
+    Graphics,
+    Compute,
+    Transfer,
+}
+
+impl Device<'_> {
+    pub fn physical_device(&self) -> vk::PhysicalDevice {
+        self.physical_device.physical_device
+    }
+
+    pub fn get_queue(&self, queue: QueueType) -> crate::Result<vk::Queue> {
+        let index = match queue {
+            QueueType::Present => get_present_queue_index(
+                self.surface_instance,
+                &self.physical_device.physical_device,
+                self.surface,
+                &self.queue_families,
+            )
+            .ok_or(crate::QueueError::PresentUnavailable),
+            QueueType::Graphics => {
+                get_first_queue_index(&self.queue_families, vk::QueueFlags::GRAPHICS)
+                    .ok_or(crate::QueueError::GraphicsUnavailable)
+            }
+            QueueType::Compute => get_separate_queue_index(
+                &self.queue_families,
+                vk::QueueFlags::COMPUTE,
+                vk::QueueFlags::TRANSFER,
+            )
+            .ok_or(crate::QueueError::ComputeUnavailable),
+            QueueType::Transfer => get_separate_queue_index(
+                &self.queue_families,
+                vk::QueueFlags::TRANSFER,
+                vk::QueueFlags::COMPUTE,
+            )
+            .ok_or(crate::QueueError::TransferUnavailable),
+        }?;
+
+        let info = vk::DeviceQueueInfo2::default()
+            .queue_family_index(index as _)
+            .queue_index(0);
+
+        Ok(unsafe { self.device.get_device_queue2(&info) })
+    }
+
+    pub fn get_dedicated_queue(&self, queue: QueueType) -> crate::Result<vk::Queue> {
+        let index = match queue {
+            QueueType::Compute => get_dedicated_queue_index(
+                &self.queue_families,
+                vk::QueueFlags::COMPUTE,
+                vk::QueueFlags::TRANSFER,
+            )
+            .ok_or(crate::QueueError::ComputeUnavailable),
+            QueueType::Transfer => get_dedicated_queue_index(
+                &self.queue_families,
+                vk::QueueFlags::TRANSFER,
+                vk::QueueFlags::COMPUTE,
+            )
+            .ok_or(crate::QueueError::TransferUnavailable),
+            _ => return Err(crate::QueueError::InvalidQueueFamilyIndex.into()),
+        }?;
+
+        let info = vk::DeviceQueueInfo2::default()
+            .queue_family_index(index as _)
+            .queue_index(0);
+
+        Ok(unsafe { self.device.get_device_queue2(&info) })
+    }
 }
 
 impl<'a> AsRef<ash::Device> for Device<'a> {
@@ -1432,7 +1547,8 @@ impl<'a> Drop for Device<'a> {
     fn drop(&mut self) {
         unsafe {
             self.device.device_wait_idle().unwrap();
-            self.device.destroy_device(self.allocation_callbacks.as_ref());
+            self.device
+                .destroy_device(self.allocation_callbacks.as_ref());
         }
     }
 }

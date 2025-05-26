@@ -30,8 +30,13 @@ impl Debug for SystemInfo {
 }
 
 impl SystemInfo {
+    #[cfg_attr(feature = "tracing", tracing::instrument)]
     pub fn get_system_info() -> crate::Result<Self> {
+        #[cfg(feature = "tracing")]
+        tracing::trace!("Loading entry...");
         let entry = unsafe { Entry::load() }?;
+        #[cfg(feature = "tracing")]
+        tracing::trace!("Entry loaded.");
         let mut validation_layers_available = false;
         let mut debug_utils_available = false;
 
@@ -43,6 +48,7 @@ impl SystemInfo {
 
             if layer_name == VALIDATION_LAYER_NAME.to_str().map_err(anyhow::Error::msg)? {
                 validation_layers_available = true;
+                break;
             }
         }
 
@@ -72,6 +78,9 @@ impl SystemInfo {
                 }
             }
         }
+
+        #[cfg(feature = "tracing")]
+        tracing::trace!(validation_layers_available, debug_utils_available);
 
         let instance_api_version = unsafe { entry.try_enumerate_instance_version() }?.unwrap();
 

@@ -248,6 +248,7 @@ impl<'a> InstanceBuilder<'a> {
         self
     }
 
+    #[cfg_attr(feature = "tracing", tracing::instrument(skip(self)))]
     pub fn build(self) -> crate::Result<Instance<'a>> {
         let system_info = SystemInfo::get_system_info()?;
 
@@ -279,6 +280,16 @@ impl<'a> InstanceBuilder<'a> {
                 vk::API_VERSION_1_0
             }
         };
+
+        #[cfg(feature = "tracing")]
+        {
+            tracing::info!(
+                "Instance version: {}.{}.{}",
+                vk::api_version_major(instance_version),
+                vk::api_version_minor(instance_version),
+                vk::api_version_patch(instance_version)
+            );
+        }
 
         let api_version = if instance_version < vk::API_VERSION_1_1 {
             instance_version
@@ -359,6 +370,9 @@ impl<'a> InstanceBuilder<'a> {
             .map(|p| unsafe { CStr::from_ptr(*p) })
             .collect::<Vec<_>>();
 
+        #[cfg(feature = "tracing")]
+        tracing::trace!(?cstr_enabled_extensions);
+
         let all_extensions_supported =
             system_info.are_extensions_available(cstr_enabled_extensions)?;
         if !all_extensions_supported {
@@ -407,7 +421,22 @@ impl<'a> InstanceBuilder<'a> {
                 .message_type(self.debug_message_type)
                 .pfn_user_callback(self.debug_callback)
                 .user_data(self.debug_user_data.into_inner());
+
+            #[cfg(feature = "tracing")]
+            tracing::trace!(?self.debug_callback, "Using debug messenger");
         };
+
+        let instance_create_flags = if cfg!(feature = "portability") {
+            self.flags | vk::InstanceCreateFlags::ENUMERATE_PORTABILITY_KHR
+        } else {
+            self.flags
+        };
+
+        let mut instance_create_info = vk::InstanceCreateInfo::default()
+            .flags(instance_create_flags)
+            .application_info(&app_info)
+            .enabled_extension_names(&enabled_extensions)
+            .enabled_layer_names(&enabled_layers);
 
         let mut features = vk::ValidationFeaturesEXT::default();
 
@@ -417,25 +446,17 @@ impl<'a> InstanceBuilder<'a> {
             features = features
                 .enabled_validation_features(&self.enabled_validation_features)
                 .disabled_validation_features(&self.disabled_validation_features);
+
+            instance_create_info = instance_create_info.push_next(&mut features);
         };
 
         let mut checks = vk::ValidationFlagsEXT::default();
 
         if !self.disabled_validation_checks.is_empty() {
             checks = checks.disabled_validation_checks(&self.disabled_validation_checks);
-        };
 
-        let instance_create_flags = if cfg!(feature = "portability") {
-            self.flags | vk::InstanceCreateFlags::ENUMERATE_PORTABILITY_KHR
-        } else {
-            self.flags
+            instance_create_info = instance_create_info.push_next(&mut checks);
         };
-
-        let instance_create_info = vk::InstanceCreateInfo::default()
-            .flags(instance_create_flags)
-            .application_info(&app_info)
-            .enabled_extension_names(&enabled_extensions)
-            .enabled_layer_names(&enabled_layers);
 
         let instance = unsafe {
             system_info
@@ -443,6 +464,9 @@ impl<'a> InstanceBuilder<'a> {
                 .create_instance(&instance_create_info, self.allocation_callbacks.as_ref())
         }
         .map_err(|_| crate::InstanceError::FailedCreateInstance)?;
+
+        #[cfg(feature = "tracing")]
+        tracing::debug!("Created vkInstance");
 
         let mut debug_loader = None;
         let mut debug_messenger = None;
@@ -476,6 +500,8 @@ impl<'a> InstanceBuilder<'a> {
                         None,
                     )?
                 });
+                #[cfg(feature = "tracing")]
+                tracing::info!("Created vkSurfaceKhr")
             }
         };
 
