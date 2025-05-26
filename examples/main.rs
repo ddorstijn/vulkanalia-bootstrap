@@ -44,30 +44,34 @@ impl ApplicationHandler for App {
         .build()
         .unwrap();
 
+        let vk12_features = vk::PhysicalDeviceVulkan12Features::default()
+            .vulkan_memory_model(true)
+            .buffer_device_address(true)
+            .timeline_semaphore(true);
+
         let vk13_features = vk::PhysicalDeviceVulkan13Features::default()
-            .dynamic_rendering(true)
-            .descriptor_binding_inline_uniform_block_update_after_bind(true)
-            .texture_compression_astc_hdr(true);
+            .dynamic_rendering(true);
 
         // let generic = GenericFeaturesPNextNode::from(vk13_features);
         // println!("generic {generic:?}");
 
         let physical_device_selector = PhysicalDeviceSelector::new(&instance)
             .allow_any_gpu_device_type(false)
-            .add_required_extension_feature(vk13_features);
+            .add_required_extension_feature(vk13_features)
+            .add_required_extension_feature(vk12_features);
 
         let mut physical_device = physical_device_selector
             //.select_first_device_unconditionally(true)
             .select()
             .unwrap();
 
-        // physical_device.enable_extensions_if_present([
-        //     vk::KHR_DYNAMIC_RENDERING_NAME.to_string_lossy(),
-        //     vk::KHR_DEPTH_STENCIL_RESOLVE_NAME.to_string_lossy(),
-        //     vk::KHR_CREATE_RENDERPASS2_NAME.to_string_lossy(),
-        //     vk::KHR_MULTIVIEW_NAME.to_string_lossy(),
-        //     vk::KHR_MAINTENANCE2_NAME.to_string_lossy(),
-        // ]);
+        physical_device.enable_extensions_if_present([
+            vk::KHR_DYNAMIC_RENDERING_NAME.to_string_lossy(),
+            vk::KHR_DEPTH_STENCIL_RESOLVE_NAME.to_string_lossy(),
+            vk::KHR_CREATE_RENDERPASS2_NAME.to_string_lossy(),
+            vk::KHR_MULTIVIEW_NAME.to_string_lossy(),
+            vk::KHR_MAINTENANCE2_NAME.to_string_lossy(),
+        ]);
 
         let device_builder = DeviceBuilder::new(&physical_device, &instance)
             .build()

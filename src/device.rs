@@ -1,7 +1,6 @@
 use crate::Instance;
 use ash::vk::{AllocationCallbacks, BaseOutStructure, Bool32, PhysicalDevice16BitStorageFeatures};
 use ash::{khr, vk};
-use bytemuck::{NoUninit, Pod};
 use std::borrow::Cow;
 use std::cell::RefCell;
 use std::cmp::Ordering;
@@ -1429,4 +1428,11 @@ impl<'a> AsRef<ash::Device> for Device<'a> {
     }
 }
 
-impl<'a> Device<'a> {}
+impl<'a> Drop for Device<'a> {
+    fn drop(&mut self) {
+        unsafe {
+            self.device.device_wait_idle().unwrap();
+            self.device.destroy_device(self.allocation_callbacks.as_ref());
+        }
+    }
+}
