@@ -1,15 +1,21 @@
 use crate::Instance;
 use ash::{khr, vk};
 use std::borrow::Cow;
+use std::cell::RefCell;
 use std::cmp::Ordering;
 use std::collections::{BTreeSet, HashSet};
-use std::ffi::{CStr, CString};
+use std::ffi::{c_void, CStr, CString};
+use std::fmt::Debug;
 use std::hash::{Hash, Hasher};
-use ash::vk::AllocationCallbacks;
+use std::marker::PhantomData;
+use std::ops::Deref;
+use ash::vk::{AllocationCallbacks, BaseOutStructure};
 
 fn supports_features(
     supported: &vk::PhysicalDeviceFeatures,
     requested: &vk::PhysicalDeviceFeatures,
+    features_supported: &GenericFeatureChain<'_>,
+    features_requested: &GenericFeatureChain<'_>,
 ) -> bool {
     macro_rules! check_feature {
         ($feature: ident) => {
@@ -75,7 +81,7 @@ fn supports_features(
     check_feature!(variable_multisample_rate);
     check_feature!(inherited_queries);
 
-    true
+    features_supported.match_all(features_requested)
 }
 
 #[inline]
@@ -201,6 +207,7 @@ pub struct PhysicalDevice<'a> {
     defer_surface_initialization: bool,
     properties2_ext_enabled: bool,
     suitable: Suitable,
+    supported_features_chain: GenericFeatureChain<'a>
 }
 
 impl Eq for PhysicalDevice<'_> {}
@@ -266,6 +273,131 @@ struct PhysicalDeviceInstanceInfo<'a> {
     properties2_ext_enabled: bool,
 }
 
+impl GenericFeaturesPNextNode<'_> {
+    const FIELD_CAPACITY: usize = 256;
+
+    fn combine(&mut self, other: &GenericFeaturesPNextNode) {
+        assert_eq!(self.s_type, other.s_type);
+
+        for i in 0..GenericFeaturesPNextNode::FIELD_CAPACITY {
+            self.fields[i] = vk::Bool32::from(self.fields[i] == vk::TRUE || other.fields[i] == vk::TRUE);
+        }
+    }
+}
+
+#[repr(C)]
+#[derive(Debug, Clone)]
+struct GenericFeaturesPNextNode<'a> {
+    s_type: vk::StructureType,
+    p_next: *mut c_void,
+    fields: [vk::Bool32; GenericFeaturesPNextNode::FIELD_CAPACITY],
+    _marker: PhantomData<&'a ()>,
+}
+
+impl<'a, T> From<T> for GenericFeaturesPNextNode<'a>
+where T: vk::ExtendsPhysicalDeviceFeatures2 + 'a {
+    fn from(value: T) -> Self {
+        assert!(size_of::<T>() <= size_of::<Self>());
+        let mut this = GenericFeaturesPNextNode {
+            s_type: vk::StructureType::from_raw(0),
+            p_next: std::ptr::null_mut(),
+            fields: [0; 256],
+            _marker: PhantomData
+        };
+        let size = size_of::<T>();
+        unsafe {
+            std::ptr::copy_nonoverlapping(
+                &value as *const T as *const u8,
+                &mut this as *mut Self as *mut u8,
+                size,
+            );
+        }
+        this
+    }
+}
+
+#[derive(Debug, Clone, Default)]
+struct GenericFeatureChain<'a> {
+    nodes: Vec<GenericFeaturesPNextNode<'a>>,
+}
+
+impl<'a> Deref for GenericFeatureChain<'a> {
+    type Target = Vec<GenericFeaturesPNextNode<'a>>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.nodes
+    }
+}
+
+impl<'a> GenericFeatureChain<'a> {
+    fn new() -> Self {
+        Self {
+            nodes: vec![]
+        }
+    }
+
+    fn add(&mut self, feature: impl vk::ExtendsPhysicalDeviceFeatures2 + 'a) {
+        let new_node = GenericFeaturesPNextNode::from(feature);
+
+        for node in &mut self.nodes {
+            if new_node.s_type == node.s_type {
+                node.combine(&new_node);
+                return;
+            }
+        };
+
+        self.nodes.push(new_node);
+    }
+
+    fn match_all(&self, features_requested: &GenericFeatureChain) -> bool {
+        if features_requested.nodes.len() != self.nodes.len() {
+            return false;
+        }
+
+        let features_requested = features_requested.nodes.as_slice();
+        let features = self.nodes.as_slice();
+
+        for (requested_node, node) in features_requested.iter().zip(features) {
+            if !match_node(requested_node, node) {
+                return false;
+            }
+        };
+
+        true
+    }
+
+    fn chain_up(&mut self, features: &mut vk::PhysicalDeviceFeatures2) {
+        let mut prev = std::ptr::null_mut::<GenericFeaturesPNextNode>();
+        for extension in self.nodes.iter_mut() {
+            if !prev.is_null() {
+                unsafe { (*prev).p_next = extension as *mut GenericFeaturesPNextNode as _ };
+            }
+            prev = extension as *mut GenericFeaturesPNextNode;
+        }
+        features.p_next = if !self.nodes.is_empty() {
+            <*mut GenericFeaturesPNextNode>::cast(self.nodes.get_mut(0).unwrap()) as _
+        } else {
+            std::ptr::null_mut()
+        };
+    }
+}
+
+fn match_node(requested: &GenericFeaturesPNextNode, supported: &GenericFeaturesPNextNode) -> bool {
+    assert_eq!(requested.s_type, supported.s_type);
+
+    for i in 0..GenericFeaturesPNextNode::FIELD_CAPACITY {
+        if requested.fields[i] == vk::TRUE && supported.fields[i] == vk::FALSE {
+            return false
+        }
+    }
+
+    true
+}
+
+pub trait Feature2: vk::ExtendsPhysicalDeviceFeatures2 + Debug {}
+
+impl<T> Feature2 for T where T: vk::ExtendsPhysicalDeviceFeatures2 + Debug {}
+
 #[derive(Debug)]
 struct SelectionCriteria<'a> {
     name: String,
@@ -280,9 +412,7 @@ struct SelectionCriteria<'a> {
     required_extensions: BTreeSet<String>,
     required_version: u32,
     required_features: vk::PhysicalDeviceFeatures,
-    required_features2: vk::PhysicalDeviceFeatures2<'a>,
-
-    // extended_features_chain
+    requested_features_chain: RefCell<GenericFeatureChain<'a>>,
     defer_surface_initialization: bool,
     use_first_gpu_unconditionally: bool,
     enable_portability_subset: bool,
@@ -303,12 +433,27 @@ impl Default for SelectionCriteria<'_> {
             required_extensions: BTreeSet::new(),
             required_version: vk::API_VERSION_1_0,
             required_features: vk::PhysicalDeviceFeatures::default(),
-            required_features2: vk::PhysicalDeviceFeatures2::default(),
             defer_surface_initialization: false,
             use_first_gpu_unconditionally: false,
             enable_portability_subset: true,
+            requested_features_chain: RefCell::new(GenericFeatureChain::new()),
         }
     }
+}
+
+unsafe fn ptr_chain_iter<T: ?Sized>(
+    ptr: &mut T,
+) -> impl Iterator<Item = *mut BaseOutStructure<'_>> {
+    let ptr = <*mut T>::cast::<BaseOutStructure<'_>>(ptr);
+    (0..).scan(ptr, |p_ptr, _| {
+        if p_ptr.is_null() {
+            return None;
+        }
+        let n_ptr = (**p_ptr).p_next;
+        let old = *p_ptr;
+        *p_ptr = n_ptr;
+        Some(old)
+    })
 }
 
 pub struct PhysicalDeviceSelector<'a> {
@@ -341,6 +486,11 @@ impl<'a> PhysicalDeviceSelector<'a> {
 
     pub fn surface(mut self, surface: vk::SurfaceKHR) -> Self {
         self.instance_info.surface.replace(surface);
+        self
+    }
+
+    pub fn add_required_extension_feature<T: vk::ExtendsPhysicalDeviceFeatures2 + 'a>(mut self, feature: T) -> Self {
+        self.selection_criteria.requested_features_chain.borrow_mut().add(feature);
         self
     }
 
@@ -502,7 +652,9 @@ impl<'a> PhysicalDeviceSelector<'a> {
 
         let required_features_supported = supports_features(
             &device.features,
-            &criteria.required_features
+            &criteria.required_features,
+            &device.supported_features_chain,
+            &criteria.requested_features_chain.borrow()
         );
         if !required_features_supported {
             device.suitable = Suitable::No;
@@ -520,9 +672,9 @@ impl<'a> PhysicalDeviceSelector<'a> {
     }
 
     fn populate_device_details(
-        &self,
+        &'a self,
         vk_phys_device: vk::PhysicalDevice,
-    ) -> crate::Result<PhysicalDevice> {
+    ) -> crate::Result<PhysicalDevice<'a>> {
         let instance_info = &self.instance_info;
         let criteria = &self.selection_criteria;
 
@@ -589,6 +741,21 @@ impl<'a> PhysicalDeviceSelector<'a> {
 
         physical_device.properties2_ext_enabled = instance_info.properties2_ext_enabled;
 
+        let mut requested_features_chain_clone = criteria.requested_features_chain.clone();
+        let instance_is_11 = instance_info.version >= vk::API_VERSION_1_1;
+        if !requested_features_chain_clone.borrow().is_empty() && (instance_is_11 || instance_info.properties2_ext_enabled) {
+            let mut local_features = vk::PhysicalDeviceFeatures2::default();
+
+            {
+                let mut supported_features_chain = requested_features_chain_clone.borrow_mut();
+                supported_features_chain.chain_up(&mut local_features);
+            }
+
+            unsafe { instance_info.instance.get_physical_device_features2(physical_device.physical_device, &mut local_features) };
+
+            physical_device.supported_features_chain = requested_features_chain_clone.into_inner();
+        }
+
         Ok(physical_device)
     }
 
@@ -649,6 +816,9 @@ impl<'a> PhysicalDeviceSelector<'a> {
                     None
                 } else {
                     fill_out_phys_dev_with_criteria(&mut phys_dev);
+
+                    println!("AVAILABLE: {:#?}", phys_dev.supported_features_chain);
+                    println!("REQUESTED: {:#?}", criteria.requested_features_chain);
                     Some(phys_dev)
                 }
             })
@@ -725,7 +895,6 @@ impl<'a> DeviceBuilder<'a> {
             })
             .collect::<Vec<_>>();
         let extensions_to_enable = self.physical_device.extensions_to_enable.iter().map(|e| cow_to_c_cow(e.clone())).collect::<Vec<_>>();
-        println!("EXTENSIONS: {extensions_to_enable:#?}");
 
         let mut extensions_to_enable = extensions_to_enable.iter().map(|e| e.as_ptr()).collect::<Vec<_>>();
         if self.physical_device.surface.is_some() || self.physical_device.defer_surface_initialization {
