@@ -50,9 +50,6 @@ impl ApplicationHandler for App {
 
         let vk13_features = vk::PhysicalDeviceVulkan13Features::default().dynamic_rendering(true);
 
-        // let generic = GenericFeaturesPNextNode::from(vk13_features);
-        // println!("generic {generic:?}");
-
         let physical_device_selector = PhysicalDeviceSelector::new(&instance)
             .allow_any_gpu_device_type(false)
             .add_required_extension_feature(vk13_features)
