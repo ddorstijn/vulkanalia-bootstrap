@@ -8,10 +8,7 @@ mod system_info;
 mod tracing;
 mod version;
 
-pub(crate) use device::Device;
-pub(crate) use instance::Instance;
-
-pub use device::{DeviceBuilder, PhysicalDeviceSelector};
+pub use device::{DeviceBuilder, PhysicalDeviceSelector, Device, PhysicalDevice, PreferredDeviceType};
 pub use error::*;
-pub use instance::InstanceBuilder;
-pub use swapchain::SwapchainBuilder;
+pub use instance::{InstanceBuilder, Instance};
+pub use swapchain::{SwapchainBuilder, Swapchain};

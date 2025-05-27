@@ -2,7 +2,7 @@ use crate::system_info::{SystemInfo, DEBUG_UTILS_EXT_NAME, VALIDATION_LAYER_NAME
 use ash::ext::debug_utils;
 use ash::vk::{api_version_minor, AllocationCallbacks, DebugUtilsMessengerEXT};
 use ash::{khr, vk};
-use raw_window_handle::{DisplayHandle, WindowHandle};
+use raw_window_handle::{DisplayHandle, RawDisplayHandle, RawWindowHandle, WindowHandle};
 use std::borrow::Cow;
 use std::ffi;
 use std::ffi::{c_char, c_void, CStr, CString};
@@ -87,7 +87,7 @@ pub struct InstanceBuilder<'a> {
     enabled_validation_features: Vec<vk::ValidationFeatureEnableEXT>,
     disabled_validation_features: Vec<vk::ValidationFeatureDisableEXT>,
 
-    allocation_callbacks: Option<vk::AllocationCallbacks<'a>>,
+    allocation_callbacks: Option<vk::AllocationCallbacks<'static>>,
 
     request_validation_layers: bool,
     enable_validation_layers: bool,
@@ -95,16 +95,16 @@ pub struct InstanceBuilder<'a> {
     use_debug_messenger: bool,
     headless_context: bool,
 
-    window_handle: Option<WindowHandle<'a>>,
-    display_handle: Option<DisplayHandle<'a>>,
+    window_handle: Option<RawWindowHandle>,
+    display_handle: Option<RawDisplayHandle>,
 
     fp_vk_get_instance_proc_addr: Option<vk::PFN_vkGetInstanceProcAddr>,
 }
 
 impl<'a> InstanceBuilder<'a> {
     pub fn new(
-        window_display_handle: Option<(WindowHandle<'a>, DisplayHandle<'a>)>,
-    ) -> InstanceBuilder<'a> {
+        window_display_handle: Option<(WindowHandle, DisplayHandle)>,
+    ) -> Self {
         let (window_handle, display_handle) = window_display_handle.unzip();
         Self {
             app_name: "".to_string(),
@@ -131,8 +131,8 @@ impl<'a> InstanceBuilder<'a> {
             enable_validation_layers: false,
             use_debug_messenger: false,
             headless_context: false,
-            window_handle,
-            display_handle,
+            display_handle: display_handle.map(|h| h.as_raw()),
+            window_handle: window_handle.map(|h| h.as_raw()),
             fp_vk_get_instance_proc_addr: None,
         }
     }
@@ -249,7 +249,7 @@ impl<'a> InstanceBuilder<'a> {
     }
 
     #[cfg_attr(feature = "tracing", tracing::instrument(skip(self)))]
-    pub fn build(self) -> crate::Result<Instance<'a>> {
+    pub fn build(self) -> crate::Result<Instance> {
         let system_info = SystemInfo::get_system_info()?;
 
         let instance_version = {
@@ -375,7 +375,7 @@ Application info: {{
         if !self.headless_context {
             if let Some(display_handle) = self.display_handle {
                 let surface_extensions_raw =
-                    ash_window::enumerate_required_extensions(display_handle.as_raw())?;
+                    ash_window::enumerate_required_extensions(display_handle)?;
                 let surface_extensions = surface_extensions_raw
                     .iter()
                     .map(|p| unsafe { CStr::from_ptr(*p) })
@@ -525,8 +525,8 @@ Application info: {{
                     ash_window::create_surface(
                         &system_info.entry,
                         &instance,
-                        display_handle.as_raw(),
-                        window_handle.as_raw(),
+                        display_handle,
+                        window_handle,
                         None,
                     )?
                 });
@@ -536,8 +536,6 @@ Application info: {{
         };
 
         Ok(Instance {
-            display_handle: self.display_handle,
-            window_handle: self.window_handle,
             instance,
             surface_instance,
             surface,
@@ -552,9 +550,9 @@ Application info: {{
     }
 }
 
-pub struct Instance<'a> {
+pub struct Instance {
     pub(crate) instance: ash::Instance,
-    pub(crate) allocation_callbacks: Option<AllocationCallbacks<'a>>,
+    pub(crate) allocation_callbacks: Option<AllocationCallbacks<'static>>,
     pub(crate) surface_instance: Option<khr::surface::Instance>,
     pub(crate) surface: Option<vk::SurfaceKHR>,
     pub(crate) instance_version: u32,
@@ -563,11 +561,9 @@ pub struct Instance<'a> {
     pub(crate) debug_loader: Option<debug_utils::Instance>,
     pub(crate) debug_messenger: Option<DebugUtilsMessengerEXT>,
     pub(crate) system_info: SystemInfo,
-    window_handle: Option<WindowHandle<'a>>,
-    display_handle: Option<DisplayHandle<'a>>,
 }
 
-impl Drop for Instance<'_> {
+impl Drop for Instance {
     fn drop(&mut self) {
         unsafe {
             if let Some((debug_messenger, debug_loader)) =
@@ -585,7 +581,7 @@ impl Drop for Instance<'_> {
     }
 }
 
-impl AsRef<ash::Instance> for Instance<'_> {
+impl AsRef<ash::Instance> for Instance {
     fn as_ref(&self) -> &ash::Instance {
         &self.instance
     }
