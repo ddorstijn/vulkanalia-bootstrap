@@ -1,6 +1,6 @@
 [package]
 name = "ash-bootstrap"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2024"
 description = "A utility library that jump starts initialization of Vulkan via Ash"
 documentation = "https://docs.rs/ash_bootstrap/latest/ash_bootstrap"
