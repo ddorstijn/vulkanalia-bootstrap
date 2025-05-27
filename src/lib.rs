@@ -6,6 +6,7 @@ mod swapchain;
 mod system_info;
 #[cfg(feature = "tracing")]
 mod tracing;
+mod version;
 
 pub(crate) use device::Device;
 pub(crate) use instance::Instance;

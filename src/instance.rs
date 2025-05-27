@@ -264,7 +264,7 @@ impl<'a> InstanceBuilder<'a> {
                     || (self.minimum_instance_version == 0
                         && version < self.required_instance_version)
                 {
-                    return match api_version_minor(self.required_instance_version) {
+                    return match api_version_minor(self.required_instance_version.max(self.minimum_instance_version)) {
                         3 => Err(crate::InstanceError::VulkanVersion13Unavailable.into()),
                         2 => Err(crate::InstanceError::VulkanVersion12Unavailable.into()),
                         1 => Err(crate::InstanceError::VulkanVersion11Unavailable.into()),
@@ -294,7 +294,11 @@ impl<'a> InstanceBuilder<'a> {
         let api_version = if instance_version < vk::API_VERSION_1_1 {
             instance_version
         } else {
-            self.required_instance_version
+            if self.required_instance_version < self.minimum_instance_version {
+                instance_version
+            } else {
+                self.required_instance_version.max(self.minimum_instance_version)
+            }
         };
 
         let app_name = CString::new(self.app_name).map_err(anyhow::Error::msg)?;
@@ -306,6 +310,32 @@ impl<'a> InstanceBuilder<'a> {
             .engine_name(&engine_name)
             .engine_version(self.engine_version)
             .api_version(api_version);
+
+        #[cfg(feature = "tracing")]
+        {
+            tracing::info!("Creating vkInstance with application info...");
+            tracing::debug!(r#"
+Application info: {{
+    name: {:?},
+    version: {}.{}.{},
+    engine_name: {:?},
+    engine_version: {}.{}.{},
+    api_version: {}.{}.{},
+}}
+            "#,
+            app_name,
+                vk::api_version_major(self.application_version),
+                vk::api_version_minor(self.application_version),
+                vk::api_version_patch(self.application_version),
+                engine_name,
+                vk::api_version_major(self.engine_version),
+                vk::api_version_minor(self.engine_version),
+                vk::api_version_patch(self.engine_version),
+                vk::api_version_major(api_version),
+                vk::api_version_minor(api_version),
+                vk::api_version_major(api_version),
+            )
+        }
 
         let mut enabled_extensions: Vec<*const c_char> = vec![];
         let mut enabled_layers: Vec<*const c_char> = vec![];
@@ -466,7 +496,7 @@ impl<'a> InstanceBuilder<'a> {
         .map_err(|_| crate::InstanceError::FailedCreateInstance)?;
 
         #[cfg(feature = "tracing")]
-        tracing::debug!("Created vkInstance");
+        tracing::info!("Created vkInstance");
 
         let mut debug_loader = None;
         let mut debug_messenger = None;

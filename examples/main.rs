@@ -39,8 +39,7 @@ impl ApplicationHandler for App {
             vk::DebugUtilsMessageSeverityFlagsEXT::VERBOSE
                 | vk::DebugUtilsMessageSeverityFlagsEXT::INFO,
         )
-            .require_api_version(vk::API_VERSION_1_3)
-        .minimum_instance_version(vk::API_VERSION_1_3)
+        .require_api_version(vk::API_VERSION_1_3)
         .build()
         .unwrap();
 
@@ -75,11 +74,20 @@ impl ApplicationHandler for App {
         let device = DeviceBuilder::new(&mut physical_device, &instance)
             .build()
             .unwrap();
+        
+        let mut swapchain_builder = SwapchainBuilder::new(&instance, &device)
+            .use_default_format_selection();
 
-        let swapchain = SwapchainBuilder::new(&instance, &device)
-            .use_default_format_selection()
+        let swapchain = swapchain_builder
             .build()
             .unwrap();
+        
+        let image_views = swapchain
+            .get_image_views()
+            .unwrap();
+        
+        swapchain.destroy_image_views().unwrap();
+        swapchain.destroy().unwrap();
     }
 
     fn window_event(

@@ -14,6 +14,7 @@ use std::hash::{Hash, Hasher};
 use std::hint::unreachable_unchecked;
 use std::marker::PhantomData;
 use std::ops::Deref;
+use crate::version::Version;
 
 fn supports_features(
     supported: &vk::PhysicalDeviceFeatures,
@@ -984,19 +985,31 @@ impl<'a> PhysicalDeviceSelector<'a> {
     fn set_is_suitable(&self, device: &mut PhysicalDevice) {
         let criteria = &self.selection_criteria;
 
+        let device_name = device
+            .properties
+            .device_name_as_c_str()
+            .expect("device name should be correct cstr")
+            .to_string_lossy();
+
         if !criteria.name.is_empty()
             && Cow::Borrowed(&criteria.name)
-                != device
-                    .properties
-                    .device_name_as_c_str()
-                    .expect("device name should be correct cstr")
-                    .to_string_lossy()
+                != device_name
         {
+            #[cfg(feature = "tracing")]
+            {
+                tracing::warn!("Device {} is not suitable. Name requested: {}", device_name, criteria.name);
+            }
             device.suitable = Suitable::No;
             return;
         };
 
         if criteria.required_version > device.properties.api_version {
+            #[cfg(feature = "tracing")]
+            {
+                let requested_version = Version::new(criteria.required_version);
+                let available_version = Version::new(device.properties.api_version);
+                tracing::warn!("Device {} is not suitable. Requested version: {}, Available version: {}", device_name, requested_version, available_version);
+            }
             device.suitable = Suitable::No;
             return;
         }
@@ -1478,7 +1491,7 @@ impl Device<'_> {
         self.physical_device.physical_device
     }
 
-    pub fn get_queue(&self, queue: QueueType) -> crate::Result<vk::Queue> {
+    pub fn get_queue(&self, queue: QueueType) -> crate::Result<(usize, vk::Queue)> {
         let index = match queue {
             QueueType::Present => get_present_queue_index(
                 self.surface_instance,
@@ -1509,7 +1522,7 @@ impl Device<'_> {
             .queue_family_index(index as _)
             .queue_index(0);
 
-        Ok(unsafe { self.device.get_device_queue2(&info) })
+        Ok((index, unsafe { self.device.get_device_queue2(&info) }))
     }
 
     pub fn get_dedicated_queue(&self, queue: QueueType) -> crate::Result<vk::Queue> {

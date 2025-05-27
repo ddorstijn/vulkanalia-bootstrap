@@ -30,7 +30,7 @@ pub unsafe extern "system" fn vulkan_tracing_callback(
                 tracing::trace!("[{message_id_name} ({message_id_number})]: {message}");
             }
             DebugUtilsMessageSeverityFlagsEXT::INFO => {
-                tracing::info!("[{message_id_name} ({message_id_number})]: {message}");
+                tracing::debug!("[{message_id_name} ({message_id_number})]: {message}");
             }
             DebugUtilsMessageSeverityFlagsEXT::ERROR => {
                 tracing::error!("[{message_id_name} ({message_id_number})]: {message}");
