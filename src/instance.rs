@@ -1,13 +1,12 @@
-use crate::system_info::{SystemInfo, DEBUG_UTILS_EXT_NAME, VALIDATION_LAYER_NAME};
+use crate::system_info::{DEBUG_UTILS_EXT_NAME, SystemInfo, VALIDATION_LAYER_NAME};
 use ash::ext::debug_utils;
-use ash::vk::{api_version_minor, AllocationCallbacks, DebugUtilsMessengerEXT};
+use ash::vk::{AllocationCallbacks, DebugUtilsMessengerEXT, api_version_minor};
 use ash::{khr, vk};
 use raw_window_handle::{DisplayHandle, RawDisplayHandle, RawWindowHandle, WindowHandle};
 use std::borrow::Cow;
 use std::ffi;
-use std::ffi::{c_char, c_void, CStr, CString};
+use std::ffi::{CStr, CString, c_char, c_void};
 use std::ops::Not;
-use std::time::Instant;
 
 unsafe extern "system" fn vulkan_debug_callback(
     message_severity: vk::DebugUtilsMessageSeverityFlagsEXT,
@@ -97,14 +96,10 @@ pub struct InstanceBuilder<'a> {
 
     window_handle: Option<RawWindowHandle>,
     display_handle: Option<RawDisplayHandle>,
-
-    fp_vk_get_instance_proc_addr: Option<vk::PFN_vkGetInstanceProcAddr>,
 }
 
 impl<'a> InstanceBuilder<'a> {
-    pub fn new(
-        window_display_handle: Option<(WindowHandle, DisplayHandle)>,
-    ) -> Self {
+    pub fn new(window_display_handle: Option<(WindowHandle, DisplayHandle)>) -> Self {
         let (window_handle, display_handle) = window_display_handle.unzip();
         Self {
             app_name: "".to_string(),
@@ -133,7 +128,6 @@ impl<'a> InstanceBuilder<'a> {
             headless_context: false,
             display_handle: display_handle.map(|h| h.as_raw()),
             window_handle: window_handle.map(|h| h.as_raw()),
-            fp_vk_get_instance_proc_addr: None,
         }
     }
 
@@ -264,7 +258,10 @@ impl<'a> InstanceBuilder<'a> {
                     || (self.minimum_instance_version == 0
                         && version < self.required_instance_version)
                 {
-                    return match api_version_minor(self.required_instance_version.max(self.minimum_instance_version)) {
+                    return match api_version_minor(
+                        self.required_instance_version
+                            .max(self.minimum_instance_version),
+                    ) {
                         3 => Err(crate::InstanceError::VulkanVersion13Unavailable.into()),
                         2 => Err(crate::InstanceError::VulkanVersion12Unavailable.into()),
                         1 => Err(crate::InstanceError::VulkanVersion11Unavailable.into()),
@@ -291,14 +288,13 @@ impl<'a> InstanceBuilder<'a> {
             );
         }
 
-        let api_version = if instance_version < vk::API_VERSION_1_1 {
+        let api_version = if instance_version < vk::API_VERSION_1_1
+            || self.required_instance_version < self.minimum_instance_version
+        {
             instance_version
         } else {
-            if self.required_instance_version < self.minimum_instance_version {
-                instance_version
-            } else {
-                self.required_instance_version.max(self.minimum_instance_version)
-            }
+            self.required_instance_version
+                .max(self.minimum_instance_version)
         };
 
         let app_name = CString::new(self.app_name).map_err(anyhow::Error::msg)?;
@@ -314,7 +310,8 @@ impl<'a> InstanceBuilder<'a> {
         #[cfg(feature = "tracing")]
         {
             tracing::info!("Creating vkInstance with application info...");
-            tracing::debug!(r#"
+            tracing::debug!(
+                r#"
 Application info: {{
     name: {:?},
     version: {}.{}.{},
@@ -323,7 +320,7 @@ Application info: {{
     api_version: {}.{}.{},
 }}
             "#,
-            app_name,
+                app_name,
                 vk::api_version_major(self.application_version),
                 vk::api_version_minor(self.application_version),
                 vk::api_version_patch(self.application_version),
@@ -517,10 +514,10 @@ Application info: {{
         let surface_instance = self
             .headless_context
             .not()
-            .then(|| unsafe { khr::surface::Instance::new(&system_info.entry, &instance) });
+            .then(|| khr::surface::Instance::new(&system_info.entry, &instance));
         let mut surface = None;
         if let Some((window_handle, display_handle)) = self.window_handle.zip(self.display_handle) {
-            if let Some(_) = surface_instance {
+            if surface_instance.is_some() {
                 surface = Some(unsafe {
                     ash_window::create_surface(
                         &system_info.entry,
@@ -545,7 +542,6 @@ Application info: {{
             properties2_ext_enabled,
             debug_loader,
             debug_messenger,
-            system_info,
         })
     }
 }
@@ -560,7 +556,6 @@ pub struct Instance {
     pub(crate) properties2_ext_enabled: bool,
     pub(crate) debug_loader: Option<debug_utils::Instance>,
     pub(crate) debug_messenger: Option<DebugUtilsMessengerEXT>,
-    pub(crate) system_info: SystemInfo,
 }
 
 impl Drop for Instance {
@@ -569,14 +564,18 @@ impl Drop for Instance {
             if let Some((debug_messenger, debug_loader)) =
                 self.debug_messenger.take().zip(self.debug_loader.take())
             {
-                debug_loader.destroy_debug_utils_messenger(debug_messenger, None);
+                debug_loader.destroy_debug_utils_messenger(
+                    debug_messenger,
+                    self.allocation_callbacks.as_ref(),
+                );
             }
             if let Some((surface_instance, surface)) =
                 self.surface_instance.take().zip(self.surface)
             {
-                surface_instance.destroy_surface(surface, None);
+                surface_instance.destroy_surface(surface, self.allocation_callbacks.as_ref());
             }
-            self.instance.destroy_instance(None);
+            self.instance
+                .destroy_instance(self.allocation_callbacks.as_ref());
         }
     }
 }

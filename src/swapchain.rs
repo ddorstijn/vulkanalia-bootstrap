@@ -1,21 +1,12 @@
-use std::cell::RefCell;
-use std::ops::Deref;
-use std::sync::Arc;
-use std::sync::atomic::{AtomicU64, Ordering};
-use crate::error::FormatError;
 use crate::Device;
 use crate::Instance;
+use crate::device::QueueType;
+use crate::error::FormatError;
 use ash::vk::{AllocationCallbacks, Handle, SwapchainKHR};
 use ash::{khr, vk};
-use crate::device::QueueType;
-
-#[repr(u8)]
-#[derive(Debug, Clone, PartialOrd, PartialEq, Ord, Eq)]
-enum BufferMode {
-    SingleBuffering = 1,
-    DoubleBuffering = 2,
-    TripleBuffering = 3,
-}
+use std::cell::RefCell;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 #[derive(Debug, Clone, Ord, PartialOrd, Eq, PartialEq)]
 enum Priority {
@@ -63,7 +54,7 @@ struct SurfaceFormatDetails {
     present_modes: Vec<vk::PresentModeKHR>,
 }
 
-fn query_surface_support_details<'a>(
+fn query_surface_support_details(
     phys_device: vk::PhysicalDevice,
     surface_instance: Option<&khr::surface::Instance>,
     surface: Option<vk::SurfaceKHR>,
@@ -153,7 +144,10 @@ fn find_best_surface_format(
     find_desired_surface_format(available, desired).unwrap_or(available[0])
 }
 
-fn find_present_mode(available: &[vk::PresentModeKHR], desired: &mut [PresentMode]) -> vk::PresentModeKHR {
+fn find_present_mode(
+    available: &[vk::PresentModeKHR],
+    desired: &mut [PresentMode],
+) -> vk::PresentModeKHR {
     if !desired.is_sorted_by_key(|f| f.priority.clone()) {
         desired.sort_unstable_by_key(|f| f.priority.clone());
     }
@@ -161,7 +155,7 @@ fn find_present_mode(available: &[vk::PresentModeKHR], desired: &mut [PresentMod
     for desired in desired {
         for available in available {
             if &desired.inner == available {
-                return *available
+                return *available;
             }
         }
     }
@@ -178,8 +172,16 @@ impl SwapchainBuilder {
                 .width(self.desired_width)
                 .height(self.desired_height);
 
-            actual_extent.width = capabilities.min_image_extent.width.max(capabilities.max_image_extent.width.min(actual_extent.width));
-            actual_extent.height = capabilities.min_image_extent.height.max(capabilities.max_image_extent.height.min(actual_extent.height));
+            actual_extent.width = capabilities
+                .min_image_extent
+                .width
+                .max(capabilities.max_image_extent.width.min(actual_extent.width));
+            actual_extent.height = capabilities.min_image_extent.height.max(
+                capabilities
+                    .max_image_extent
+                    .height
+                    .min(actual_extent.height),
+            );
 
             actual_extent
         }
@@ -189,7 +191,10 @@ impl SwapchainBuilder {
         Self {
             graphics_queue_index: device.get_queue(QueueType::Graphics).unwrap().0,
             present_queue_index: device.get_queue(QueueType::Present).unwrap().0,
-            swapchain_device: Arc::new(khr::swapchain::Device::new(&instance.instance, device.as_ref().as_ref())),
+            swapchain_device: Arc::new(khr::swapchain::Device::new(
+                &instance.instance,
+                device.as_ref().as_ref(),
+            )),
             instance,
             device,
             allocation_callbacks: None,
@@ -296,7 +301,10 @@ impl SwapchainBuilder {
         self
     }
 
-    pub fn allocation_callbacks(mut self, allocation_callbacks: AllocationCallbacks<'static>) -> Self {
+    pub fn allocation_callbacks(
+        mut self,
+        allocation_callbacks: AllocationCallbacks<'static>,
+    ) -> Self {
         self.allocation_callbacks = Some(allocation_callbacks);
         self
     }
@@ -306,7 +314,8 @@ impl SwapchainBuilder {
     /// # Note:
     /// This method will mark old swapchain and destroy it when creating a new one.
     pub fn set_old_swapchain(&self, swapchain: Swapchain) {
-        self.old_swapchain.store(swapchain.swapchain.as_raw(), Ordering::Relaxed);
+        self.old_swapchain
+            .store(swapchain.swapchain.as_raw(), Ordering::Relaxed);
     }
 
     pub fn build(&self) -> crate::Result<Swapchain> {
@@ -341,13 +350,13 @@ impl SwapchainBuilder {
             // We intentionally use minImageCount + 1 to maintain existing behavior,
             // even if it typically results in triple buffering on most systems.
             image_count = surface_support.capabilities.min_image_count + 1;
-        } else {
-            if image_count < surface_support.capabilities.min_image_count {
-                image_count = surface_support.capabilities.min_image_count
-            }
+        } else if image_count < surface_support.capabilities.min_image_count {
+            image_count = surface_support.capabilities.min_image_count
         }
 
-        if surface_support.capabilities.max_image_count > 0 && image_count > surface_support.capabilities.max_image_count {
+        if surface_support.capabilities.max_image_count > 0
+            && image_count > surface_support.capabilities.max_image_count
+        {
             image_count = surface_support.capabilities.max_image_count;
         }
 
@@ -364,18 +373,24 @@ impl SwapchainBuilder {
             image_array_layers = 1;
         }
 
-        let present_mode = find_present_mode(&surface_support.present_modes, &mut desired_present_modes);
+        let present_mode =
+            find_present_mode(&surface_support.present_modes, &mut desired_present_modes);
 
-        let is_unextended_present_mode = match present_mode {
-            | vk::PresentModeKHR::IMMEDIATE
-            | vk::PresentModeKHR::MAILBOX
-            | vk::PresentModeKHR::FIFO
-            | vk::PresentModeKHR::FIFO_RELAXED => true,
-            _ => false
-        };
+        let is_unextended_present_mode =
+            matches!(
+                present_mode,
+                |vk::PresentModeKHR::IMMEDIATE| vk::PresentModeKHR::MAILBOX
+                    | vk::PresentModeKHR::FIFO
+                    | vk::PresentModeKHR::FIFO_RELAXED
+            );
 
-        if is_unextended_present_mode && !surface_support.capabilities.supported_usage_flags.contains(self.image_usage_flags) {
-            return Err(crate::SwapchainError::RequiredUsageNotSupported.into())
+        if is_unextended_present_mode
+            && !surface_support
+                .capabilities
+                .supported_usage_flags
+                .contains(self.image_usage_flags)
+        {
+            return Err(crate::SwapchainError::RequiredUsageNotSupported.into());
         };
 
         let mut pre_transform = self.pre_transform;
@@ -402,20 +417,30 @@ impl SwapchainBuilder {
 
         let queue_family_indices = [
             self.graphics_queue_index as _,
-            self.present_queue_index as _
+            self.present_queue_index as _,
         ];
 
         if self.graphics_queue_index != self.present_queue_index {
             swapchain_create_info.image_sharing_mode = vk::SharingMode::CONCURRENT;
-            swapchain_create_info = swapchain_create_info.queue_family_indices(&queue_family_indices);
+            swapchain_create_info =
+                swapchain_create_info.queue_family_indices(&queue_family_indices);
         } else {
             swapchain_create_info.image_sharing_mode = vk::SharingMode::EXCLUSIVE;
         }
 
-        let swapchain = unsafe { self.swapchain_device.create_swapchain(&swapchain_create_info, self.allocation_callbacks.as_ref()) }.map_err(|_| crate::SwapchainError::FailedCreateSwapchain)?;
+        let swapchain = unsafe {
+            self.swapchain_device
+                .create_swapchain(&swapchain_create_info, self.allocation_callbacks.as_ref())
+        }
+        .map_err(|_| crate::SwapchainError::FailedCreateSwapchain)?;
 
         if old_swapchain != 0 {
-            unsafe { self.swapchain_device.destroy_swapchain(SwapchainKHR::from_raw(old_swapchain), self.allocation_callbacks.as_ref()) }
+            unsafe {
+                self.swapchain_device.destroy_swapchain(
+                    SwapchainKHR::from_raw(old_swapchain),
+                    self.allocation_callbacks.as_ref(),
+                )
+            }
         }
 
         Ok(Swapchain {
@@ -423,14 +448,10 @@ impl SwapchainBuilder {
             swapchain,
             swapchain_device: self.swapchain_device.clone(),
             image_format: surface_format.format,
-            color_space: surface_format.color_space,
             image_usage_flags: self.image_usage_flags,
-            extent,
-            requested_min_image_count: image_count as usize,
-            present_mode,
             instance_version: self.instance.instance_version,
             allocation_callbacks: self.allocation_callbacks,
-            image_views: RefCell::new(Vec::with_capacity(image_count as _))
+            image_views: RefCell::new(Vec::with_capacity(image_count as _)),
         })
     }
 }
@@ -440,14 +461,10 @@ pub struct Swapchain {
     swapchain: vk::SwapchainKHR,
     swapchain_device: Arc<khr::swapchain::Device>,
     image_format: vk::Format,
-    color_space: vk::ColorSpaceKHR,
     image_usage_flags: vk::ImageUsageFlags,
-    extent: vk::Extent2D,
-    requested_min_image_count: usize,
-    present_mode: vk::PresentModeKHR,
     instance_version: u32,
     allocation_callbacks: Option<AllocationCallbacks<'static>>,
-    image_views: RefCell<Vec<vk::ImageView>>
+    image_views: RefCell<Vec<vk::ImageView>>,
 }
 
 impl Swapchain {
@@ -461,7 +478,11 @@ impl Swapchain {
         let mut image_views = self.image_views.borrow_mut();
 
         for image_view in image_views.drain(..) {
-            unsafe { self.device.device().destroy_image_view(image_view, self.allocation_callbacks.as_ref()) }
+            unsafe {
+                self.device
+                    .device()
+                    .destroy_image_view(image_view, self.allocation_callbacks.as_ref())
+            }
         }
 
         Ok(())
@@ -470,32 +491,39 @@ impl Swapchain {
     pub fn get_image_views(&self) -> crate::Result<Vec<vk::ImageView>> {
         let images = self.get_images()?;
 
-        let mut desired_flags = vk::ImageViewUsageCreateInfo::default()
-            .usage(self.image_usage_flags);
+        let mut desired_flags =
+            vk::ImageViewUsageCreateInfo::default().usage(self.image_usage_flags);
 
-        let views: Vec<_> = images.into_iter().map(|image| {
-            let mut create_info = vk::ImageViewCreateInfo::default();
+        let views: Vec<_> = images
+            .into_iter()
+            .map(|image| {
+                let mut create_info = vk::ImageViewCreateInfo::default();
 
-            if self.instance_version >= vk::API_VERSION_1_1 {
-                create_info = create_info
-                    .push_next(&mut desired_flags);
-            }
+                if self.instance_version >= vk::API_VERSION_1_1 {
+                    create_info = create_info.push_next(&mut desired_flags);
+                }
 
-            create_info.image = image;
-            create_info.view_type = vk::ImageViewType::TYPE_2D;
-            create_info.format = self.image_format;
-            create_info.components.r = vk::ComponentSwizzle::IDENTITY;
-            create_info.components.g = vk::ComponentSwizzle::IDENTITY;
-            create_info.components.b = vk::ComponentSwizzle::IDENTITY;
-            create_info.components.a = vk::ComponentSwizzle::IDENTITY;
-            create_info.subresource_range.aspect_mask = vk::ImageAspectFlags::COLOR;
-            create_info.subresource_range.base_mip_level = 0;
-            create_info.subresource_range.level_count = 1;
-            create_info.subresource_range.base_array_layer = 0;
-            create_info.subresource_range.layer_count = 1;
+                create_info.image = image;
+                create_info.view_type = vk::ImageViewType::TYPE_2D;
+                create_info.format = self.image_format;
+                create_info.components.r = vk::ComponentSwizzle::IDENTITY;
+                create_info.components.g = vk::ComponentSwizzle::IDENTITY;
+                create_info.components.b = vk::ComponentSwizzle::IDENTITY;
+                create_info.components.a = vk::ComponentSwizzle::IDENTITY;
+                create_info.subresource_range.aspect_mask = vk::ImageAspectFlags::COLOR;
+                create_info.subresource_range.base_mip_level = 0;
+                create_info.subresource_range.level_count = 1;
+                create_info.subresource_range.base_array_layer = 0;
+                create_info.subresource_range.layer_count = 1;
 
-            unsafe { self.device.device().create_image_view(&create_info, self.allocation_callbacks.as_ref()) }.map_err(Into::into)
-        }).collect::<crate::Result<_>>()?;
+                unsafe {
+                    self.device
+                        .device()
+                        .create_image_view(&create_info, self.allocation_callbacks.as_ref())
+                }
+                .map_err(Into::into)
+            })
+            .collect::<crate::Result<_>>()?;
 
         {
             let mut image_views = self.image_views.borrow_mut();
@@ -506,7 +534,10 @@ impl Swapchain {
     }
 
     pub fn destroy(self) -> crate::Result<()> {
-        unsafe { self.swapchain_device.destroy_swapchain(self.swapchain, self.allocation_callbacks.as_ref()) };
+        unsafe {
+            self.swapchain_device
+                .destroy_swapchain(self.swapchain, self.allocation_callbacks.as_ref())
+        };
         Ok(())
     }
 }

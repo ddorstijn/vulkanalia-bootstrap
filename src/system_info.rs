@@ -1,4 +1,4 @@
-use ash::{vk, Entry};
+use ash::{Entry, vk};
 use std::ffi::CStr;
 use std::fmt::{Debug, Formatter};
 
@@ -149,7 +149,6 @@ impl SystemInfo {
 
 #[cfg(test)]
 mod tests {
-    use crate::system_info::SystemInfo;
 
     #[test]
     fn test() {}

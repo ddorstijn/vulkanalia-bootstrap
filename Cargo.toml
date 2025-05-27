@@ -41,11 +41,6 @@ tracing = { version = "0.1.41", optional = true }
 tracing-subscriber = { version = "0.3.19", features = ["env-filter"] }
 winit = "0.30.11"
 
-[[test]]
-name = "examples"
-path = "examples/main.rs"
-harness = false
-
 [package.metadata.release]
 no-dev-version = true
 

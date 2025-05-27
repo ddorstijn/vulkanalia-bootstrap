@@ -74,9 +74,9 @@ pub enum QueueError {
 }
 
 #[derive(Debug, PartialEq, Eq)]
-pub(crate) struct FormatError {
-    pub(crate) available: Vec<vk::SurfaceFormatKHR>,
-    pub(crate) desired: Vec<vk::SurfaceFormatKHR>,
+pub struct FormatError {
+    pub available: Vec<vk::SurfaceFormatKHR>,
+    pub desired: Vec<vk::SurfaceFormatKHR>,
 }
 
 #[derive(Debug, PartialEq, Eq, Error)]
