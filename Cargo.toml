@@ -2,6 +2,32 @@
 name = "ash-bootstrap"
 version = "0.1.0"
 edition = "2024"
+description = "A utility library that jump starts initialization of Vulkan via Ash"
+documentation = "https://docs.rs/ash_bootstrap/latest/ash_bootstrap"
+homepage = "https://github.com/Drevoed/ash-bootstrap"
+repository = "https://github.com/Drevoed/ash-bootstrap"
+license = "MIT OR Apache-2.0"
+readme = "README.md"
+authors = [
+    "Kirill Mironov <vetrokm@gmail.com>"
+]
+categories = [
+    "api-bindings",
+    "external-ffi-bindings",
+    "game-development",
+    "graphics",
+    "rendering::graphics-api"
+]
+keywords = [
+    "vulkan",
+    "ash",
+    "bindings",
+    "gamedev",
+    "rendering"
+]
+# We use 2024 edition so we set the MSRV to 1.85.0
+rust-version = "1.85.0"
+
 
 [dependencies]
 ash = { version = "0.38.0", features = ["loaded"] }
@@ -19,6 +45,13 @@ winit = "0.30.11"
 name = "examples"
 path = "examples/main.rs"
 harness = false
+
+[package.metadata.release]
+no-dev-version = true
+
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
 
 [features]
 
