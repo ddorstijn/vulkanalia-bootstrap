@@ -296,6 +296,12 @@ impl<'a> InstanceBuilder<'a> {
             self.required_instance_version
                 .max(self.minimum_instance_version)
         };
+        #[cfg(feature = "tracing")]
+        {
+            use crate::version::Version;
+            let version = Version::new(api_version);
+            tracing::info!("api_version: {}", version);
+        }
 
         let app_name = CString::new(self.app_name).map_err(anyhow::Error::msg)?;
         let engine_name = CString::new(self.engine_name).map_err(anyhow::Error::msg)?;
@@ -330,7 +336,7 @@ Application info: {{
                 vk::api_version_patch(self.engine_version),
                 vk::api_version_major(api_version),
                 vk::api_version_minor(api_version),
-                vk::api_version_major(api_version),
+                vk::api_version_patch(api_version),
             )
         }
 
@@ -542,6 +548,7 @@ Application info: {{
             properties2_ext_enabled,
             debug_loader,
             debug_messenger,
+            _system_info: system_info,
         })
     }
 }
@@ -552,25 +559,26 @@ pub struct Instance {
     pub(crate) surface_instance: Option<khr::surface::Instance>,
     pub(crate) surface: Option<vk::SurfaceKHR>,
     pub(crate) instance_version: u32,
-    pub(crate) api_version: u32,
+    pub api_version: u32,
     pub(crate) properties2_ext_enabled: bool,
     pub(crate) debug_loader: Option<debug_utils::Instance>,
     pub(crate) debug_messenger: Option<DebugUtilsMessengerEXT>,
+    _system_info: SystemInfo,
 }
 
-impl Drop for Instance {
-    fn drop(&mut self) {
+impl Instance {
+    pub fn destroy(&self) {
         unsafe {
             if let Some((debug_messenger, debug_loader)) =
-                self.debug_messenger.take().zip(self.debug_loader.take())
+                self.debug_messenger.as_ref().zip(self.debug_loader.as_ref())
             {
                 debug_loader.destroy_debug_utils_messenger(
-                    debug_messenger,
+                    *debug_messenger,
                     self.allocation_callbacks.as_ref(),
                 );
             }
             if let Some((surface_instance, surface)) =
-                self.surface_instance.take().zip(self.surface)
+                self.surface_instance.as_ref().zip(self.surface)
             {
                 surface_instance.destroy_surface(surface, self.allocation_callbacks.as_ref());
             }

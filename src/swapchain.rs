@@ -5,7 +5,8 @@ use crate::error::FormatError;
 use ash::vk::{AllocationCallbacks, Handle, SwapchainKHR};
 use ash::{khr, vk};
 use std::cell::RefCell;
-use std::sync::Arc;
+use std::ops::Deref;
+use std::sync::{Arc, Mutex};
 use std::sync::atomic::{AtomicU64, Ordering};
 
 #[derive(Debug, Clone, Ord, PartialOrd, Eq, PartialEq)]
@@ -314,6 +315,7 @@ impl SwapchainBuilder {
     /// # Note:
     /// This method will mark old swapchain and destroy it when creating a new one.
     pub fn set_old_swapchain(&self, swapchain: Swapchain) {
+        swapchain.destroy_image_views();
         self.old_swapchain
             .store(swapchain.swapchain.as_raw(), Ordering::Relaxed);
     }
@@ -446,12 +448,13 @@ impl SwapchainBuilder {
         Ok(Swapchain {
             device: self.device.clone(),
             swapchain,
+            extent,
             swapchain_device: self.swapchain_device.clone(),
             image_format: surface_format.format,
             image_usage_flags: self.image_usage_flags,
             instance_version: self.instance.instance_version,
             allocation_callbacks: self.allocation_callbacks,
-            image_views: RefCell::new(Vec::with_capacity(image_count as _)),
+            image_views: Mutex::new(Vec::with_capacity(image_count as _)),
         })
     }
 }
@@ -460,11 +463,12 @@ pub struct Swapchain {
     device: Arc<Device>,
     swapchain: vk::SwapchainKHR,
     swapchain_device: Arc<khr::swapchain::Device>,
-    image_format: vk::Format,
+    pub image_format: vk::Format,
+    pub extent: vk::Extent2D,
     image_usage_flags: vk::ImageUsageFlags,
     instance_version: u32,
     allocation_callbacks: Option<AllocationCallbacks<'static>>,
-    image_views: RefCell<Vec<vk::ImageView>>,
+    image_views: Mutex<Vec<vk::ImageView>>,
 }
 
 impl Swapchain {
@@ -475,7 +479,7 @@ impl Swapchain {
     }
 
     pub fn destroy_image_views(&self) -> crate::Result<()> {
-        let mut image_views = self.image_views.borrow_mut();
+        let mut image_views = self.image_views.lock().unwrap();
 
         for image_view in image_views.drain(..) {
             unsafe {
@@ -526,24 +530,31 @@ impl Swapchain {
             .collect::<crate::Result<_>>()?;
 
         {
-            let mut image_views = self.image_views.borrow_mut();
+            let mut image_views = self.image_views.lock().unwrap();
             *image_views = views.clone();
         }
 
         Ok(views)
     }
 
-    pub fn destroy(self) -> crate::Result<()> {
+    pub fn destroy(&self) {
         unsafe {
             self.swapchain_device
                 .destroy_swapchain(self.swapchain, self.allocation_callbacks.as_ref())
         };
-        Ok(())
     }
 }
 
 impl AsRef<SwapchainKHR> for Swapchain {
     fn as_ref(&self) -> &SwapchainKHR {
         &self.swapchain
+    }
+}
+
+impl Deref for Swapchain {
+    type Target = khr::swapchain::Device;
+
+    fn deref(&self) -> &Self::Target {
+        &*self.swapchain_device
     }
 }

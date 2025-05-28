@@ -195,7 +195,7 @@ pub enum Suitable {
 #[derive(Default, Debug)]
 pub struct PhysicalDevice {
     name: String,
-    physical_device: vk::PhysicalDevice,
+    pub physical_device: vk::PhysicalDevice,
     surface: Option<vk::SurfaceKHR>,
 
     features: vk::PhysicalDeviceFeatures,
@@ -209,6 +209,12 @@ pub struct PhysicalDevice {
     suitable: Suitable,
     supported_features_chain: GenericFeatureChain<'static>,
     requested_features_chain: GenericFeatureChain<'static>,
+}
+
+impl AsRef<vk::PhysicalDevice> for PhysicalDevice {
+    fn as_ref(&self) -> &vk::PhysicalDevice {
+        &self.physical_device
+    }
 }
 
 impl Eq for PhysicalDevice {}
@@ -1521,6 +1527,13 @@ impl Device {
 
         Ok(unsafe { self.device.get_device_queue2(&info) })
     }
+    
+    pub fn destroy(&self) {
+        unsafe {
+            self.device
+                .destroy_device(self.allocation_callbacks.as_ref());
+        }
+    }
 }
 
 impl AsRef<ash::Device> for Device {
@@ -1529,12 +1542,10 @@ impl AsRef<ash::Device> for Device {
     }
 }
 
-impl Drop for Device {
-    fn drop(&mut self) {
-        unsafe {
-            self.device.device_wait_idle().unwrap();
-            self.device
-                .destroy_device(self.allocation_callbacks.as_ref());
-        }
+impl Deref for Device {
+    type Target = ash::Device;
+
+    fn deref(&self) -> &Self::Target {
+        &self.device
     }
 }
