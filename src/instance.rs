@@ -569,8 +569,10 @@ pub struct Instance {
 impl Instance {
     pub fn destroy(&self) {
         unsafe {
-            if let Some((debug_messenger, debug_loader)) =
-                self.debug_messenger.as_ref().zip(self.debug_loader.as_ref())
+            if let Some((debug_messenger, debug_loader)) = self
+                .debug_messenger
+                .as_ref()
+                .zip(self.debug_loader.as_ref())
             {
                 debug_loader.destroy_debug_utils_messenger(
                     *debug_messenger,

@@ -6,8 +6,8 @@ use ash::vk::{AllocationCallbacks, Handle, SwapchainKHR};
 use ash::{khr, vk};
 use std::cell::RefCell;
 use std::ops::Deref;
-use std::sync::{Arc, Mutex};
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Mutex};
 
 #[derive(Debug, Clone, Ord, PartialOrd, Eq, PartialEq)]
 enum Priority {

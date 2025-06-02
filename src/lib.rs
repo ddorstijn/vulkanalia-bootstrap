@@ -8,8 +8,7 @@ mod tracing;
 mod version;
 
 pub use device::{
-    Device, DeviceBuilder, PhysicalDevice, PhysicalDeviceSelector, PreferredDeviceType,
-    QueueType,
+    Device, DeviceBuilder, PhysicalDevice, PhysicalDeviceSelector, PreferredDeviceType, QueueType,
 };
 pub use error::*;
 pub use instance::{Instance, InstanceBuilder};

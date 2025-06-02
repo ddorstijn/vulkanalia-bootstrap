@@ -206,6 +206,7 @@ pub struct PhysicalDevice {
     queue_families: Vec<vk::QueueFamilyProperties>,
     defer_surface_initialization: bool,
     properties2_ext_enabled: bool,
+    pub supported_format_properties: Vec<(vk::Format, vk::FormatProperties)>,
     suitable: Suitable,
     supported_features_chain: GenericFeatureChain<'static>,
     requested_features_chain: GenericFeatureChain<'static>,
@@ -840,6 +841,7 @@ struct SelectionCriteria<'a> {
     required_extensions: BTreeSet<String>,
     required_version: u32,
     required_features: vk::PhysicalDeviceFeatures,
+    required_formats: Vec<vk::Format>,
     requested_features_chain: RefCell<GenericFeatureChain<'a>>,
     defer_surface_initialization: bool,
     use_first_gpu_unconditionally: bool,
@@ -865,6 +867,7 @@ impl Default for SelectionCriteria<'_> {
             use_first_gpu_unconditionally: false,
             enable_portability_subset: true,
             requested_features_chain: RefCell::new(GenericFeatureChain::new()),
+            required_formats: vec![],
         }
     }
 }
@@ -947,6 +950,11 @@ impl PhysicalDeviceSelector {
 
     pub fn required_device_memory_size(mut self, required: vk::DeviceSize) -> Self {
         self.selection_criteria.required_mem_size = required;
+        self
+    }
+
+    pub fn required_formats(mut self, required: impl IntoIterator<Item = vk::Format>) -> Self {
+        self.selection_criteria.required_formats = required.into_iter().collect();
         self
     }
 
@@ -1110,6 +1118,8 @@ impl PhysicalDeviceSelector {
             return;
         }
 
+        //let supported_formats = &device.format_properties;
+
         for memory_heap in device.memory_properties.memory_heaps {
             if memory_heap
                 .flags
@@ -1152,6 +1162,29 @@ impl PhysicalDeviceSelector {
                 instance
                     .instance
                     .get_physical_device_memory_properties(vk_phys_device)
+            },
+            supported_format_properties: {
+                // vulkan has 185 formats in ash
+                let range = 0..185;
+                range
+                    .filter_map(|format| {
+                        let format = vk::Format::from_raw(format);
+                        let format_properties = unsafe {
+                            instance
+                                .instance
+                                .get_physical_device_format_properties(vk_phys_device, format)
+                        };
+                        if !format_properties.optimal_tiling_features.is_empty() || !format_properties.buffer_features.is_empty() || !format_properties.linear_tiling_features.is_empty() {
+                            if format == vk::Format::BC7_SRGB_BLOCK {
+                                Some((format, format_properties))
+                            } else {
+                                None
+                            }
+                        } else {
+                            None
+                        }
+                    })
+                    .collect()
             },
             properties2_ext_enabled: instance.properties2_ext_enabled,
             requested_features_chain: criteria.requested_features_chain.clone().into_inner(),
@@ -1527,7 +1560,7 @@ impl Device {
 
         Ok(unsafe { self.device.get_device_queue2(&info) })
     }
-    
+
     pub fn destroy(&self) {
         unsafe {
             self.device
