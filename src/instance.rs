@@ -7,6 +7,7 @@ use std::borrow::Cow;
 use std::ffi;
 use std::ffi::{CStr, CString, c_char, c_void};
 use std::ops::Not;
+use std::sync::Arc;
 
 unsafe extern "system" fn vulkan_debug_callback(
     message_severity: vk::DebugUtilsMessageSeverityFlagsEXT,
@@ -243,7 +244,7 @@ impl<'a> InstanceBuilder<'a> {
     }
 
     #[cfg_attr(feature = "enable_tracing", tracing::instrument(skip(self)))]
-    pub fn build(self) -> crate::Result<Instance> {
+    pub fn build(self) -> crate::Result<Arc<Instance>> {
         let system_info = SystemInfo::get_system_info()?;
 
         let instance_version = {
@@ -538,7 +539,7 @@ Application info: {{
             }
         };
 
-        Ok(Instance {
+        Ok(Arc::new(Instance {
             instance,
             surface_instance,
             surface,
@@ -549,7 +550,7 @@ Application info: {{
             debug_loader,
             debug_messenger,
             _system_info: system_info,
-        })
+        }))
     }
 }
 
