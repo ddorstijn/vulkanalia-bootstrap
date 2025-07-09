@@ -1,11 +1,10 @@
 use crate::Instance;
-use crate::version::Version;
 use ash::vk::AllocationCallbacks;
 use ash::{khr, vk};
 use std::borrow::Cow;
 use std::cell::RefCell;
 use std::cmp::Ordering;
-use std::collections::{BTreeSet, HashMap};
+use std::collections::BTreeSet;
 use std::ffi::{CStr, CString};
 use std::fmt::Debug;
 use std::hash::Hash;
@@ -195,7 +194,7 @@ pub enum Suitable {
 #[derive(Default, Debug)]
 pub struct PhysicalDevice {
     name: String,
-    pub physical_device: vk::PhysicalDevice,
+    physical_device: vk::PhysicalDevice,
     surface: Option<vk::SurfaceKHR>,
 
     features: vk::PhysicalDeviceFeatures,
@@ -206,7 +205,7 @@ pub struct PhysicalDevice {
     queue_families: Vec<vk::QueueFamilyProperties>,
     defer_surface_initialization: bool,
     properties2_ext_enabled: bool,
-    supported_format_properties: HashMap<vk::Format, vk::FormatProperties>,
+    //supported_format_properties: HashMap<vk::Format, vk::FormatProperties>,
     suitable: Suitable,
     supported_features_chain: GenericFeatureChain<'static>,
     requested_features_chain: GenericFeatureChain<'static>,
@@ -1024,6 +1023,7 @@ impl PhysicalDeviceSelector {
         if criteria.required_version > device.properties.api_version {
             #[cfg(feature = "enable_tracing")]
             {
+                use crate::version::Version;
                 let requested_version = Version::new(criteria.required_version);
                 let available_version = Version::new(device.properties.api_version);
                 tracing::warn!(
@@ -1199,28 +1199,28 @@ impl PhysicalDeviceSelector {
                     .instance
                     .get_physical_device_memory_properties(vk_phys_device)
             },
-            supported_format_properties: {
-                // vulkan has 185 formats in ash
-                let range = 0..185;
-                range
-                    .filter_map(|format| {
-                        let format = vk::Format::from_raw(format);
-                        let format_properties = unsafe {
-                            instance
-                                .instance
-                                .get_physical_device_format_properties(vk_phys_device, format)
-                        };
-                        if !format_properties.optimal_tiling_features.is_empty()
-                            || !format_properties.buffer_features.is_empty()
-                            || !format_properties.linear_tiling_features.is_empty()
-                        {
-                            Some((format, format_properties))
-                        } else {
-                            None
-                        }
-                    })
-                    .collect()
-            },
+            // supported_format_properties: {
+            //     // vulkan has 185 formats in ash
+            //     let range = 0..185;
+            //     range
+            //         .filter_map(|format| {
+            //             let format = vk::Format::from_raw(format);
+            //             let format_properties = unsafe {
+            //                 instance
+            //                     .instance
+            //                     .get_physical_device_format_properties(vk_phys_device, format)
+            //             };
+            //             if !format_properties.optimal_tiling_features.is_empty()
+            //                 || !format_properties.buffer_features.is_empty()
+            //                 || !format_properties.linear_tiling_features.is_empty()
+            //             {
+            //                 Some((format, format_properties))
+            //             } else {
+            //                 None
+            //             }
+            //         })
+            //         .collect()
+            // },
             properties2_ext_enabled: instance.properties2_ext_enabled,
             requested_features_chain: criteria.requested_features_chain.clone().into_inner(),
             ..Default::default()
