@@ -3,7 +3,7 @@ mod error;
 mod instance;
 mod swapchain;
 mod system_info;
-#[cfg(feature = "tracing")]
+#[cfg(feature = "enable_tracing")]
 mod tracing;
 mod version;
 

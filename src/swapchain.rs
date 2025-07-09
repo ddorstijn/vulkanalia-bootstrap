@@ -223,6 +223,12 @@ impl SwapchainBuilder {
         self
     }
 
+    pub fn desired_size(mut self, size: vk::Extent2D) -> Self {
+        self.desired_width = size.width;
+        self.desired_height = size.height;
+        self
+    }
+
     pub fn fallback_format(mut self, format: vk::SurfaceFormat2KHR<'static>) -> Self {
         self.desired_formats.push(Format {
             inner: format,
@@ -336,7 +342,7 @@ impl SwapchainBuilder {
         }
 
         let surface_support = query_surface_support_details(
-            self.device.physical_device(),
+            self.device.physical_device().physical_device,
             self.instance.surface_instance.as_ref(),
             self.instance.surface,
         )?;

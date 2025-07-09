@@ -5,7 +5,7 @@ use ash::{khr, vk};
 use std::borrow::Cow;
 use std::cell::RefCell;
 use std::cmp::Ordering;
-use std::collections::BTreeSet;
+use std::collections::{BTreeSet, HashMap};
 use std::ffi::{CStr, CString};
 use std::fmt::Debug;
 use std::hash::Hash;
@@ -206,7 +206,7 @@ pub struct PhysicalDevice {
     queue_families: Vec<vk::QueueFamilyProperties>,
     defer_surface_initialization: bool,
     properties2_ext_enabled: bool,
-    pub supported_format_properties: Vec<(vk::Format, vk::FormatProperties)>,
+    supported_format_properties: HashMap<vk::Format, vk::FormatProperties>,
     suitable: Suitable,
     supported_features_chain: GenericFeatureChain<'static>,
     requested_features_chain: GenericFeatureChain<'static>,
@@ -241,6 +241,37 @@ impl Ord for PhysicalDevice {
 }
 
 impl PhysicalDevice {
+    pub fn msaa_samples(&self) -> vk::SampleCountFlags {
+        let limits = &self.properties.limits;
+        let counts =
+            limits.framebuffer_color_sample_counts & limits.framebuffer_depth_sample_counts;
+
+        if counts.contains(vk::SampleCountFlags::TYPE_64) {
+            return vk::SampleCountFlags::TYPE_64;
+        }
+
+        if counts.contains(vk::SampleCountFlags::TYPE_32) {
+            return vk::SampleCountFlags::TYPE_32;
+        }
+
+        if counts.contains(vk::SampleCountFlags::TYPE_16) {
+            return vk::SampleCountFlags::TYPE_16;
+        }
+
+        if counts.contains(vk::SampleCountFlags::TYPE_8) {
+            return vk::SampleCountFlags::TYPE_8;
+        }
+
+        if counts.contains(vk::SampleCountFlags::TYPE_4) {
+            return vk::SampleCountFlags::TYPE_4;
+        }
+
+        if counts.contains(vk::SampleCountFlags::TYPE_2) {
+            return vk::SampleCountFlags::TYPE_2;
+        }
+
+        vk::SampleCountFlags::TYPE_1
+    }
     pub fn enable_extension_if_present(&mut self, extension: impl Into<Cow<'static, str>>) -> bool {
         let extension = extension.into();
 
@@ -913,6 +944,11 @@ impl PhysicalDeviceSelector {
         self
     }
 
+    pub fn add_required_features(mut self, features: vk::PhysicalDeviceFeatures) -> Self {
+        self.selection_criteria.required_features = features;
+        self
+    }
+
     pub fn name(mut self, name: impl Into<String>) -> Self {
         self.selection_criteria.name = name.into();
         self
@@ -973,7 +1009,7 @@ impl PhysicalDeviceSelector {
             .to_string_lossy();
 
         if !criteria.name.is_empty() && Cow::Borrowed(&criteria.name) != device_name {
-            #[cfg(feature = "tracing")]
+            #[cfg(feature = "enable_tracing")]
             {
                 tracing::warn!(
                     "Device {} is not suitable. Name requested: {}",
@@ -986,7 +1022,7 @@ impl PhysicalDeviceSelector {
         };
 
         if criteria.required_version > device.properties.api_version {
-            #[cfg(feature = "tracing")]
+            #[cfg(feature = "enable_tracing")]
             {
                 let requested_version = Version::new(criteria.required_version);
                 let available_version = Version::new(device.properties.api_version);
@@ -1174,12 +1210,11 @@ impl PhysicalDeviceSelector {
                                 .instance
                                 .get_physical_device_format_properties(vk_phys_device, format)
                         };
-                        if !format_properties.optimal_tiling_features.is_empty() || !format_properties.buffer_features.is_empty() || !format_properties.linear_tiling_features.is_empty() {
-                            if format == vk::Format::BC7_SRGB_BLOCK {
-                                Some((format, format_properties))
-                            } else {
-                                None
-                            }
+                        if !format_properties.optimal_tiling_features.is_empty()
+                            || !format_properties.buffer_features.is_empty()
+                            || !format_properties.linear_tiling_features.is_empty()
+                        {
+                            Some((format, format_properties))
                         } else {
                             None
                         }
@@ -1325,7 +1360,7 @@ impl PhysicalDeviceSelector {
 
     pub fn select(self) -> crate::Result<PhysicalDevice> {
         let devices = self.select_devices()?;
-        #[cfg(feature = "tracing")]
+        #[cfg(feature = "enable_tracing")]
         {
             tracing::debug!(
                 "Device suitability: {:#?}",
@@ -1498,8 +1533,8 @@ impl Device {
         &self.device
     }
 
-    pub fn physical_device(&self) -> vk::PhysicalDevice {
-        self.physical_device.physical_device
+    pub fn physical_device(&self) -> &PhysicalDevice {
+        &self.physical_device
     }
 
     pub fn get_queue(&self, queue: QueueType) -> crate::Result<(usize, vk::Queue)> {

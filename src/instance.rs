@@ -187,7 +187,7 @@ impl<'a> InstanceBuilder<'a> {
         self
     }
 
-    #[cfg(feature = "tracing")]
+    #[cfg(feature = "enable_tracing")]
     pub fn use_default_tracing_messenger(mut self) -> Self {
         self.use_debug_messenger = true;
         self.debug_callback = Some(crate::tracing::vulkan_tracing_callback);
@@ -242,7 +242,7 @@ impl<'a> InstanceBuilder<'a> {
         self
     }
 
-    #[cfg_attr(feature = "tracing", tracing::instrument(skip(self)))]
+    #[cfg_attr(feature = "enable_tracing", tracing::instrument(skip(self)))]
     pub fn build(self) -> crate::Result<Instance> {
         let system_info = SystemInfo::get_system_info()?;
 
@@ -278,7 +278,7 @@ impl<'a> InstanceBuilder<'a> {
             }
         };
 
-        #[cfg(feature = "tracing")]
+        #[cfg(feature = "enable_tracing")]
         {
             tracing::info!(
                 "Instance version: {}.{}.{}",
@@ -296,7 +296,7 @@ impl<'a> InstanceBuilder<'a> {
             self.required_instance_version
                 .max(self.minimum_instance_version)
         };
-        #[cfg(feature = "tracing")]
+        #[cfg(feature = "enable_tracing")]
         {
             use crate::version::Version;
             let version = Version::new(api_version);
@@ -313,7 +313,7 @@ impl<'a> InstanceBuilder<'a> {
             .engine_version(self.engine_version)
             .api_version(api_version);
 
-        #[cfg(feature = "tracing")]
+        #[cfg(feature = "enable_tracing")]
         {
             tracing::info!("Creating vkInstance with application info...");
             tracing::debug!(
@@ -403,7 +403,7 @@ Application info: {{
             .map(|p| unsafe { CStr::from_ptr(*p) })
             .collect::<Vec<_>>();
 
-        #[cfg(feature = "tracing")]
+        #[cfg(feature = "enable_tracing")]
         tracing::trace!(?cstr_enabled_extensions);
 
         let all_extensions_supported =
@@ -455,7 +455,7 @@ Application info: {{
                 .pfn_user_callback(self.debug_callback)
                 .user_data(self.debug_user_data.into_inner());
 
-            #[cfg(feature = "tracing")]
+            #[cfg(feature = "enable_tracing")]
             tracing::trace!(?self.debug_callback, "Using debug messenger");
         };
 
@@ -498,7 +498,7 @@ Application info: {{
         }
         .map_err(|_| crate::InstanceError::FailedCreateInstance)?;
 
-        #[cfg(feature = "tracing")]
+        #[cfg(feature = "enable_tracing")]
         tracing::info!("Created vkInstance");
 
         let mut debug_loader = None;
@@ -533,7 +533,7 @@ Application info: {{
                         None,
                     )?
                 });
-                #[cfg(feature = "tracing")]
+                #[cfg(feature = "enable_tracing")]
                 tracing::info!("Created vkSurfaceKhr")
             }
         };

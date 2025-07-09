@@ -28,7 +28,6 @@ keywords = [
 # We use 2024 edition so we set the MSRV to 1.85.0
 rust-version = "1.85.0"
 
-
 [dependencies]
 ash = { version = "0.38.0", features = ["loaded"] }
 ash-window = { version = "0.13.0" }
@@ -36,10 +35,6 @@ thiserror = "2.0.12"
 anyhow = "1.0.98"
 raw-window-handle = { version = "0.6.2" }
 tracing = { version = "0.1.41", optional = true }
-
-[dev-dependencies]
-tracing-subscriber = { version = "0.3.19", features = ["env-filter"] }
-winit = "0.30.11"
 
 [package.metadata.release]
 no-dev-version = true
@@ -49,6 +44,8 @@ all-features = true
 rustdoc-args = ["--cfg", "docsrs"]
 
 [features]
+# Enables log output using tracing crate
+enable_tracing = ["tracing"]
 
 # Enables vk_khr_portability_subset and adds ENUMERATE_PORTABILITY_KHR to VkInstanceCreateInfoFlags
 portability = []
