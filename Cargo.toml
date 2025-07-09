@@ -36,6 +36,10 @@ anyhow = "1.0.98"
 raw-window-handle = { version = "0.6.2" }
 tracing = { version = "0.1.41", optional = true }
 
+[dev-dependencies]
+tracing-subscriber = { version = "0.3.19", features = ["env-filter"] }
+winit = "0.30.11"
+
 [package.metadata.release]
 no-dev-version = true
 
@@ -51,3 +55,7 @@ enable_tracing = ["tracing"]
 portability = []
 
 default = []
+
+[[example]]
+name = "simple"
+required-features = ["enable_tracing"]

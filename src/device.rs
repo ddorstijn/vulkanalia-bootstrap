@@ -1565,11 +1565,9 @@ impl Device {
             .ok_or(crate::QueueError::TransferUnavailable),
         }?;
 
-        let info = vk::DeviceQueueInfo2::default()
-            .queue_family_index(index as _)
-            .queue_index(0);
-
-        Ok((index, unsafe { self.device.get_device_queue2(&info) }))
+        Ok((index, unsafe {
+            self.device.get_device_queue(index as _, 0)
+        }))
     }
 
     pub fn get_dedicated_queue(&self, queue: QueueType) -> crate::Result<vk::Queue> {
