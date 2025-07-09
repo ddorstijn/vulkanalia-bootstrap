@@ -22,8 +22,8 @@ impl ApplicationHandler for App {
         let init_window = || -> anyhow::Result<Window> {
             let window = event_loop.create_window(WindowAttributes::default())?;
 
-            let window_handle = window.window_handle()?;
-            let display_handle = window.display_handle().unwrap();
+            let _window_handle = window.window_handle()?;
+            let _display_handle = window.display_handle().unwrap();
 
             let instance = InstanceBuilder::new(None)
                 .app_name("Example Vulkan Application")

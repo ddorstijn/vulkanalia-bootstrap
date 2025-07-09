@@ -1,6 +1,6 @@
 [package]
 name = "ash-bootstrap"
-version = "0.1.2"
+version = "0.1.3"
 edition = "2024"
 description = "A utility library that jump starts initialization of Vulkan via Ash"
 documentation = "https://docs.rs/ash_bootstrap/latest/ash_bootstrap"
@@ -39,9 +39,6 @@ tracing = { version = "0.1.41", optional = true }
 [dev-dependencies]
 tracing-subscriber = { version = "0.3.19", features = ["env-filter"] }
 winit = "0.30.11"
-
-[package.metadata.release]
-no-dev-version = true
 
 [package.metadata.docs.rs]
 all-features = true

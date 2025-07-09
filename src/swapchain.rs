@@ -4,7 +4,6 @@ use crate::device::QueueType;
 use crate::error::FormatError;
 use ash::vk::{AllocationCallbacks, Handle, SwapchainKHR};
 use ash::{khr, vk};
-use std::cell::RefCell;
 use std::ops::Deref;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
@@ -321,7 +320,11 @@ impl SwapchainBuilder {
     /// # Note:
     /// This method will mark old swapchain and destroy it when creating a new one.
     pub fn set_old_swapchain(&self, swapchain: Swapchain) {
-        swapchain.destroy_image_views();
+        if swapchain.destroy_image_views().is_err() {
+            #[cfg(feature = "enable_tracing")]
+            tracing::warn!("Could not destroy swapchain image views");
+            return;
+        };
         self.old_swapchain
             .store(swapchain.swapchain.as_raw(), Ordering::Relaxed);
     }
@@ -342,7 +345,7 @@ impl SwapchainBuilder {
         }
 
         let surface_support = query_surface_support_details(
-            self.device.physical_device().physical_device,
+            *self.device.physical_device().as_ref(),
             self.instance.surface_instance.as_ref(),
             self.instance.surface,
         )?;
@@ -561,6 +564,6 @@ impl Deref for Swapchain {
     type Target = khr::swapchain::Device;
 
     fn deref(&self) -> &Self::Target {
-        &*self.swapchain_device
+        &self.swapchain_device
     }
 }
