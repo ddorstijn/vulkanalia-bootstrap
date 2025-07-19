@@ -10,7 +10,7 @@
 
 ```toml
 [dependencies]
-ash_bootstrap = "0.1.2"
+ash_bootstrap = "0.1.3"
 ```
 
 

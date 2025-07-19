@@ -198,7 +198,7 @@ pub struct PhysicalDevice {
     surface: Option<vk::SurfaceKHR>,
 
     features: vk::PhysicalDeviceFeatures,
-    properties: vk::PhysicalDeviceProperties,
+    pub properties: vk::PhysicalDeviceProperties,
     memory_properties: vk::PhysicalDeviceMemoryProperties,
     extensions_to_enable: BTreeSet<Cow<'static, str>>,
     available_extensions: BTreeSet<Cow<'static, str>>,
