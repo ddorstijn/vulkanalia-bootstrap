@@ -1,9 +1,11 @@
-use ash::{Entry, vk};
-use std::ffi::CStr;
 use std::fmt::{Debug, Formatter};
+use vulkanalia::loader::{LIBRARY, LibloadingLoader};
+use vulkanalia::vk::{EntryV1_0, EntryV1_1};
+use vulkanalia::{Entry, vk};
 
-pub const VALIDATION_LAYER_NAME: &CStr = c"VK_LAYER_KHRONOS_validation";
-pub const DEBUG_UTILS_EXT_NAME: &CStr = vk::EXT_DEBUG_UTILS_NAME;
+pub const VALIDATION_LAYER_NAME: vk::ExtensionName =
+    vk::ExtensionName::from_bytes(b"VK_LAYER_KHRONOS_validation");
+pub const DEBUG_UTILS_EXT_NAME: vk::ExtensionName = vk::EXT_DEBUG_UTILS_EXTENSION.name;
 
 pub struct SystemInfo {
     pub available_layers: Vec<vk::LayerProperties>,
@@ -34,7 +36,8 @@ impl SystemInfo {
     pub fn get_system_info() -> crate::Result<Self> {
         #[cfg(feature = "enable_tracing")]
         tracing::trace!("Loading entry...");
-        let entry = unsafe { Entry::load() }?;
+        let loader = unsafe { LibloadingLoader::new(LIBRARY) }?;
+        let entry = unsafe { Entry::new(loader).unwrap() };
         #[cfg(feature = "enable_tracing")]
         tracing::trace!("Entry loaded.");
         let mut validation_layers_available = false;
@@ -43,10 +46,7 @@ impl SystemInfo {
         let available_layers = unsafe { entry.enumerate_instance_layer_properties() }?;
 
         for layer in &available_layers {
-            let layer_cstr = layer.layer_name_as_c_str().map_err(anyhow::Error::msg)?;
-            let layer_name = layer_cstr.to_str().map_err(anyhow::Error::msg)?;
-
-            if layer_name == VALIDATION_LAYER_NAME.to_str().map_err(anyhow::Error::msg)? {
+            if layer.layer_name.to_string_lossy() == VALIDATION_LAYER_NAME.to_string_lossy() {
                 validation_layers_available = true;
                 break;
             }
@@ -56,24 +56,20 @@ impl SystemInfo {
             unsafe { entry.enumerate_instance_extension_properties(None) }?;
 
         for ext in &available_extensions {
-            if ext.extension_name_as_c_str().map_err(anyhow::Error::msg)? == DEBUG_UTILS_EXT_NAME {
+            if ext.extension_name.to_string_lossy() == DEBUG_UTILS_EXT_NAME.to_string_lossy() {
                 debug_utils_available = true;
             }
         }
 
         for layer in &available_layers {
             let layer_extensions = unsafe {
-                entry.enumerate_instance_extension_properties(Some(
-                    layer.layer_name_as_c_str().map_err(anyhow::Error::msg)?,
-                ))
+                entry.enumerate_instance_extension_properties(Some(layer.layer_name.as_bytes()))
             }?;
 
             available_extensions.extend_from_slice(&layer_extensions);
 
             for ext in &layer_extensions {
-                if ext.extension_name_as_c_str().map_err(anyhow::Error::msg)?
-                    == DEBUG_UTILS_EXT_NAME
-                {
+                if ext.extension_name == DEBUG_UTILS_EXT_NAME {
                     debug_utils_available = true;
                 }
             }
@@ -82,7 +78,7 @@ impl SystemInfo {
         #[cfg(feature = "enable_tracing")]
         tracing::trace!(validation_layers_available, debug_utils_available);
 
-        let instance_api_version = unsafe { entry.try_enumerate_instance_version() }?.unwrap();
+        let instance_api_version = unsafe { entry.enumerate_instance_version() }?;
 
         Ok(Self {
             available_layers,
@@ -94,10 +90,9 @@ impl SystemInfo {
         })
     }
 
-    pub fn is_extension_available(&self, extension: &CStr) -> crate::Result<bool> {
+    pub fn is_extension_available(&self, extension: vk::ExtensionName) -> crate::Result<bool> {
         for ext in &self.available_extensions {
-            let cstr = ext.extension_name_as_c_str().map_err(anyhow::Error::msg)?;
-            if cstr == extension {
+            if ext.extension_name == extension {
                 return Ok(true);
             }
         }
@@ -105,7 +100,7 @@ impl SystemInfo {
         Ok(false)
     }
 
-    pub fn are_extensions_available<'a, I: IntoIterator<Item = &'a CStr>>(
+    pub fn are_extensions_available<I: IntoIterator<Item = vk::ExtensionName>>(
         &self,
         extensions: I,
     ) -> crate::Result<bool> {
@@ -120,10 +115,9 @@ impl SystemInfo {
         Ok(all_found)
     }
 
-    pub fn is_layer_available(&self, layer: &CStr) -> crate::Result<bool> {
+    pub fn is_layer_available(&self, layer: vk::ExtensionName) -> crate::Result<bool> {
         for ext in &self.available_layers {
-            let cstr = ext.layer_name_as_c_str().map_err(anyhow::Error::msg)?;
-            if cstr == layer {
+            if ext.layer_name.to_string_lossy() == layer.to_string_lossy() {
                 return Ok(true);
             }
         }
@@ -131,7 +125,7 @@ impl SystemInfo {
         Ok(false)
     }
 
-    pub fn are_layers_available<'a, I: IntoIterator<Item = &'a CStr>>(
+    pub fn are_layers_available<'a, I: IntoIterator<Item = vk::ExtensionName>>(
         &self,
         layers: I,
     ) -> crate::Result<bool> {

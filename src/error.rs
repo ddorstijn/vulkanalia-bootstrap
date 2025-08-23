@@ -1,5 +1,5 @@
-use ash::vk;
 use thiserror::Error;
+use vulkanalia::vk;
 
 #[derive(Debug, Error)]
 pub enum Error {
@@ -11,10 +11,12 @@ pub enum Error {
     Queue(#[from] QueueError),
     #[error("Swapchain error: {0}")]
     Swapchain(#[from] SwapchainError),
-    #[error("Ash loading error: {0}")]
-    AshLoading(#[from] ash::LoadingError),
+    #[error("Vulkanalia loading error: {0}")]
+    AshLoading(#[from] libloading::Error),
     #[error("Vulkan error: {0}")]
-    Vulkan(#[from] ash::vk::Result),
+    Vulkan(#[from] vulkanalia::vk::Result),
+    #[error("Vulkan error: {0}")]
+    VulkanErr(#[from] vk::ErrorCode),
     #[error(transparent)]
     Other(#[from] anyhow::Error),
 }
@@ -31,18 +33,18 @@ pub enum InstanceError {
     VulkanVersion12Unavailable,
     #[error("Vulkan 1.3 unavailable")]
     VulkanVersion13Unavailable,
-    // TODO: uncomment when https://github.com/ash-rs/ash/pull/951 lands
-    // VulkanVersion14Unavailable
+    #[error("Vulkan 1.4 unavailable")]
+    VulkanVersion14Unavailable,
     #[error("Failed to create instance")]
     FailedCreateInstance,
     #[error("Failed to create debug messenger")]
     FailedCreateDebugMessenger,
     #[error("Failed to find requested layers: {0:#?}")]
-    RequestedLayersNotPresent(Vec<String>),
+    RequestedLayersNotPresent(Vec<vk::ExtensionName>),
     #[error("Failed to find requested extensions: {0:#?}")]
-    RequestedExtensionsNotPresent(Vec<String>),
+    RequestedExtensionsNotPresent(Vec<vk::ExtensionName>),
     #[error("Failed to find windowing extensions: {0:#?}")]
-    WindowingExtensionsNotPresent(Vec<String>),
+    WindowingExtensionsNotPresent(Vec<vk::ExtensionName>),
 }
 
 #[derive(Debug, PartialOrd, PartialEq, Eq, Ord, Error)]

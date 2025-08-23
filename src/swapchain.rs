@@ -2,11 +2,14 @@ use crate::Device;
 use crate::Instance;
 use crate::device::QueueType;
 use crate::error::FormatError;
-use ash::vk::{AllocationCallbacks, Handle, SwapchainKHR};
-use ash::{khr, vk};
-use std::ops::Deref;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
+use vulkanalia::vk;
+use vulkanalia::vk::DeviceV1_0;
+use vulkanalia::vk::HasBuilder;
+use vulkanalia::vk::KhrSurfaceExtension;
+use vulkanalia::vk::KhrSwapchainExtension;
+use vulkanalia::vk::{AllocationCallbacks, Handle, SwapchainKHR};
 
 #[derive(Debug, Clone, Ord, PartialOrd, Eq, PartialEq)]
 enum Priority {
@@ -15,8 +18,8 @@ enum Priority {
 }
 
 #[derive(Debug, Clone)]
-struct Format<'a> {
-    inner: vk::SurfaceFormat2KHR<'a>,
+struct Format {
+    inner: vk::SurfaceFormat2KHR,
     priority: Priority,
 }
 
@@ -29,9 +32,8 @@ struct PresentMode {
 pub struct SwapchainBuilder {
     instance: Arc<Instance>,
     device: Arc<Device>,
-    swapchain_device: Arc<khr::swapchain::Device>,
-    allocation_callbacks: Option<AllocationCallbacks<'static>>,
-    desired_formats: Vec<Format<'static>>,
+    allocation_callbacks: Option<AllocationCallbacks>,
+    desired_formats: Vec<Format>,
     create_flags: vk::SwapchainCreateFlagsKHR,
     desired_width: u32,
     desired_height: u32,
@@ -56,20 +58,19 @@ struct SurfaceFormatDetails {
 
 fn query_surface_support_details(
     phys_device: vk::PhysicalDevice,
-    surface_instance: Option<&khr::surface::Instance>,
+    instance: &vulkanalia::Instance,
     surface: Option<vk::SurfaceKHR>,
 ) -> crate::Result<SurfaceFormatDetails> {
-    let Some((surface_instance, surface)) = surface_instance.zip(surface) else {
+    let Some(surface) = surface else {
         return Err(crate::SwapchainError::SurfaceHandleNotProvided.into());
     };
 
     let capabilities =
-        unsafe { surface_instance.get_physical_device_surface_capabilities(phys_device, surface) }?;
+        unsafe { instance.get_physical_device_surface_capabilities_khr(phys_device, surface) }?;
     let formats =
-        unsafe { surface_instance.get_physical_device_surface_formats(phys_device, surface) }?;
-    let present_modes = unsafe {
-        surface_instance.get_physical_device_surface_present_modes(phys_device, surface)
-    }?;
+        unsafe { instance.get_physical_device_surface_formats_khr(phys_device, surface) }?;
+    let present_modes =
+        unsafe { instance.get_physical_device_surface_present_modes_khr(phys_device, surface) }?;
 
     Ok(SurfaceFormatDetails {
         capabilities,
@@ -78,22 +79,28 @@ fn query_surface_support_details(
     })
 }
 
-fn default_formats<'a>() -> Vec<Format<'a>> {
+fn default_formats<'a>() -> Vec<Format> {
     vec![
         Format {
-            inner: vk::SurfaceFormat2KHR::default().surface_format(
-                vk::SurfaceFormatKHR::default()
-                    .format(vk::Format::B8G8R8A8_SRGB)
-                    .color_space(vk::ColorSpaceKHR::SRGB_NONLINEAR),
-            ),
+            inner: vk::SurfaceFormat2KHR {
+                surface_format: vk::SurfaceFormatKHR {
+                    format: vk::Format::B8G8R8A8_SRGB,
+                    color_space: vk::ColorSpaceKHR::SRGB_NONLINEAR,
+                    ..Default::default()
+                },
+                ..Default::default()
+            },
             priority: Priority::Main,
         },
         Format {
-            inner: vk::SurfaceFormat2KHR::default().surface_format(
-                vk::SurfaceFormatKHR::default()
-                    .format(vk::Format::R8G8B8_SRGB)
-                    .color_space(vk::ColorSpaceKHR::SRGB_NONLINEAR),
-            ),
+            inner: vk::SurfaceFormat2KHR {
+                surface_format: vk::SurfaceFormatKHR {
+                    format: vk::Format::R8G8B8_SRGB,
+                    color_space: vk::ColorSpaceKHR::SRGB_NONLINEAR,
+                    ..Default::default()
+                },
+                ..Default::default()
+            },
             priority: Priority::Fallback,
         },
     ]
@@ -168,9 +175,10 @@ impl SwapchainBuilder {
         if capabilities.current_extent.width != u32::MAX {
             capabilities.current_extent
         } else {
-            let mut actual_extent = vk::Extent2D::default()
-                .width(self.desired_width)
-                .height(self.desired_height);
+            let mut actual_extent = vk::Extent2D {
+                width: self.desired_width,
+                height: self.desired_height,
+            };
 
             actual_extent.width = capabilities
                 .min_image_extent
@@ -191,10 +199,6 @@ impl SwapchainBuilder {
         Self {
             graphics_queue_index: device.get_queue(QueueType::Graphics).unwrap().0,
             present_queue_index: device.get_queue(QueueType::Present).unwrap().0,
-            swapchain_device: Arc::new(khr::swapchain::Device::new(
-                &instance.instance,
-                device.as_ref().as_ref(),
-            )),
             instance,
             device,
             allocation_callbacks: None,
@@ -214,7 +218,7 @@ impl SwapchainBuilder {
         }
     }
 
-    pub fn desired_format(mut self, format: vk::SurfaceFormat2KHR<'static>) -> Self {
+    pub fn desired_format(mut self, format: vk::SurfaceFormat2KHR) -> Self {
         self.desired_formats.push(Format {
             inner: format,
             priority: Priority::Main,
@@ -228,7 +232,7 @@ impl SwapchainBuilder {
         self
     }
 
-    pub fn fallback_format(mut self, format: vk::SurfaceFormat2KHR<'static>) -> Self {
+    pub fn fallback_format(mut self, format: vk::SurfaceFormat2KHR) -> Self {
         self.desired_formats.push(Format {
             inner: format,
             priority: Priority::Fallback,
@@ -307,10 +311,7 @@ impl SwapchainBuilder {
         self
     }
 
-    pub fn allocation_callbacks(
-        mut self,
-        allocation_callbacks: AllocationCallbacks<'static>,
-    ) -> Self {
+    pub fn allocation_callbacks(mut self, allocation_callbacks: AllocationCallbacks) -> Self {
         self.allocation_callbacks = Some(allocation_callbacks);
         self
     }
@@ -346,7 +347,7 @@ impl SwapchainBuilder {
 
         let surface_support = query_surface_support_details(
             *self.device.physical_device().as_ref(),
-            self.instance.surface_instance.as_ref(),
+            &self.instance.instance,
             self.instance.surface,
         )?;
 
@@ -411,7 +412,7 @@ impl SwapchainBuilder {
 
         let old_swapchain = self.old_swapchain.load(Ordering::Relaxed);
 
-        let mut swapchain_create_info = vk::SwapchainCreateInfoKHR::default()
+        let mut swapchain_create_info = vk::SwapchainCreateInfoKHR::builder()
             .flags(self.create_flags)
             .surface(self.instance.surface.unwrap())
             .min_image_count(image_count)
@@ -440,14 +441,14 @@ impl SwapchainBuilder {
         }
 
         let swapchain = unsafe {
-            self.swapchain_device
-                .create_swapchain(&swapchain_create_info, self.allocation_callbacks.as_ref())
+            self.device
+                .create_swapchain_khr(&swapchain_create_info, self.allocation_callbacks.as_ref())
         }
         .map_err(|_| crate::SwapchainError::FailedCreateSwapchain)?;
 
         if old_swapchain != 0 {
             unsafe {
-                self.swapchain_device.destroy_swapchain(
+                self.device.destroy_swapchain_khr(
                     SwapchainKHR::from_raw(old_swapchain),
                     self.allocation_callbacks.as_ref(),
                 )
@@ -458,7 +459,6 @@ impl SwapchainBuilder {
             device: self.device.clone(),
             swapchain,
             extent,
-            swapchain_device: self.swapchain_device.clone(),
             image_format: surface_format.format,
             image_usage_flags: self.image_usage_flags,
             instance_version: self.instance.instance_version,
@@ -471,18 +471,17 @@ impl SwapchainBuilder {
 pub struct Swapchain {
     device: Arc<Device>,
     swapchain: vk::SwapchainKHR,
-    swapchain_device: Arc<khr::swapchain::Device>,
     pub image_format: vk::Format,
     pub extent: vk::Extent2D,
     image_usage_flags: vk::ImageUsageFlags,
     instance_version: u32,
-    allocation_callbacks: Option<AllocationCallbacks<'static>>,
+    allocation_callbacks: Option<AllocationCallbacks>,
     image_views: Mutex<Vec<vk::ImageView>>,
 }
 
 impl Swapchain {
     pub fn get_images(&self) -> crate::Result<Vec<vk::Image>> {
-        let images = unsafe { self.swapchain_device.get_swapchain_images(self.swapchain) }?;
+        let images = unsafe { self.device.get_swapchain_images_khr(self.swapchain) }?;
 
         Ok(images)
     }
@@ -504,30 +503,30 @@ impl Swapchain {
     pub fn get_image_views(&self) -> crate::Result<Vec<vk::ImageView>> {
         let images = self.get_images()?;
 
-        let mut desired_flags =
-            vk::ImageViewUsageCreateInfo::default().usage(self.image_usage_flags);
+        let mut desired_flags = vk::ImageViewUsageCreateInfo {
+            usage: self.image_usage_flags,
+            ..Default::default()
+        };
 
         let views: Vec<_> = images
             .into_iter()
             .map(|image| {
-                let mut create_info = vk::ImageViewCreateInfo::default();
+                let mut create_info = vk::ImageViewCreateInfo::builder();
 
-                if self.instance_version >= vk::API_VERSION_1_1 {
+                if self.instance_version >= vk::make_version(1, 1, 0) {
                     create_info = create_info.push_next(&mut desired_flags);
                 }
 
-                create_info.image = image;
-                create_info.view_type = vk::ImageViewType::TYPE_2D;
-                create_info.format = self.image_format;
-                create_info.components.r = vk::ComponentSwizzle::IDENTITY;
-                create_info.components.g = vk::ComponentSwizzle::IDENTITY;
-                create_info.components.b = vk::ComponentSwizzle::IDENTITY;
-                create_info.components.a = vk::ComponentSwizzle::IDENTITY;
-                create_info.subresource_range.aspect_mask = vk::ImageAspectFlags::COLOR;
-                create_info.subresource_range.base_mip_level = 0;
-                create_info.subresource_range.level_count = 1;
-                create_info.subresource_range.base_array_layer = 0;
-                create_info.subresource_range.layer_count = 1;
+                create_info.image(image);
+                create_info.view_type(vk::ImageViewType::_2D);
+                create_info.format(self.image_format);
+                create_info.components(vk::ComponentMapping::default());
+                create_info.subresource_range(
+                    vk::ImageSubresourceRange::builder()
+                        .aspect_mask(vk::ImageAspectFlags::COLOR)
+                        .level_count(1)
+                        .layer_count(1),
+                );
 
                 unsafe {
                     self.device
@@ -548,8 +547,8 @@ impl Swapchain {
 
     pub fn destroy(&self) {
         unsafe {
-            self.swapchain_device
-                .destroy_swapchain(self.swapchain, self.allocation_callbacks.as_ref())
+            self.device
+                .destroy_swapchain_khr(self.swapchain, self.allocation_callbacks.as_ref())
         };
     }
 }
@@ -557,13 +556,5 @@ impl Swapchain {
 impl AsRef<SwapchainKHR> for Swapchain {
     fn as_ref(&self) -> &SwapchainKHR {
         &self.swapchain
-    }
-}
-
-impl Deref for Swapchain {
-    type Target = khr::swapchain::Device;
-
-    fn deref(&self) -> &Self::Target {
-        &self.swapchain_device
     }
 }

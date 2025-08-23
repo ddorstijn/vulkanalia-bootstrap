@@ -1,16 +1,16 @@
 use crate::Instance;
-use ash::vk::AllocationCallbacks;
-use ash::{khr, vk};
 use std::borrow::Cow;
 use std::cell::RefCell;
 use std::cmp::Ordering;
 use std::collections::BTreeSet;
-use std::ffi::{CStr, CString};
 use std::fmt::Debug;
-use std::hash::Hash;
 use std::hint::unreachable_unchecked;
 use std::ops::Deref;
 use std::sync::Arc;
+use vulkanalia::vk::{
+    self, DeviceV1_0, HasBuilder, InstanceV1_0, InstanceV1_1, KhrSurfaceExtension,
+};
+use vulkanalia::vk::{AllocationCallbacks, DeviceV1_1};
 
 fn supports_features(
     supported: &vk::PhysicalDeviceFeatures,
@@ -72,8 +72,8 @@ fn supports_features(
     check_feature!(shader_resource_min_lod);
     check_feature!(sparse_binding);
     check_feature!(sparse_residency_buffer);
-    check_feature!(sparse_residency_image2_d);
-    check_feature!(sparse_residency_image3_d);
+    check_feature!(sparse_residency_image_2d);
+    check_feature!(sparse_residency_image_3d);
     check_feature!(sparse_residency2_samples);
     check_feature!(sparse_residency4_samples);
     check_feature!(sparse_residency8_samples);
@@ -133,15 +133,16 @@ fn get_dedicated_queue_index(
 }
 
 fn get_present_queue_index(
-    instance: &Option<khr::surface::Instance>,
+    instance: &vulkanalia::Instance,
     device: vk::PhysicalDevice,
     surface: Option<vk::SurfaceKHR>,
     families: &[vk::QueueFamilyProperties],
 ) -> Option<usize> {
     for (i, _) in families.iter().enumerate() {
-        if let Some((surface, instance)) = surface.zip(instance.as_ref()) {
-            let present_support =
-                unsafe { instance.get_physical_device_surface_support(device, i as u32, surface) };
+        if let Some(surface) = surface {
+            let present_support = unsafe {
+                instance.get_physical_device_surface_support_khr(device, i as u32, surface)
+            };
 
             if let Ok(present_support) = present_support {
                 if present_support {
@@ -155,15 +156,15 @@ fn get_present_queue_index(
 }
 
 fn check_device_extension_support(
-    available_extensions: &BTreeSet<Cow<'_, str>>,
-    required_extensions: &BTreeSet<String>,
-) -> BTreeSet<String> {
-    let mut extensions_to_enable = BTreeSet::new();
+    available_extensions: &BTreeSet<vk::ExtensionName>,
+    required_extensions: &BTreeSet<vk::ExtensionName>,
+) -> BTreeSet<vk::ExtensionName> {
+    let mut extensions_to_enable = BTreeSet::<vk::ExtensionName>::new();
 
     for avail_ext in available_extensions {
         for req_ext in required_extensions {
             if avail_ext == req_ext {
-                extensions_to_enable.insert(req_ext.to_string());
+                extensions_to_enable.insert(*req_ext);
                 break;
             }
         }
@@ -200,15 +201,15 @@ pub struct PhysicalDevice {
     features: vk::PhysicalDeviceFeatures,
     pub properties: vk::PhysicalDeviceProperties,
     memory_properties: vk::PhysicalDeviceMemoryProperties,
-    extensions_to_enable: BTreeSet<Cow<'static, str>>,
-    available_extensions: BTreeSet<Cow<'static, str>>,
+    extensions_to_enable: BTreeSet<vk::ExtensionName>,
+    available_extensions: BTreeSet<vk::ExtensionName>,
     queue_families: Vec<vk::QueueFamilyProperties>,
     defer_surface_initialization: bool,
     properties2_ext_enabled: bool,
     //supported_format_properties: HashMap<vk::Format, vk::FormatProperties>,
     suitable: Suitable,
-    supported_features_chain: GenericFeatureChain<'static>,
-    requested_features_chain: GenericFeatureChain<'static>,
+    supported_features_chain: GenericFeatureChain,
+    requested_features_chain: GenericFeatureChain,
 }
 
 impl AsRef<vk::PhysicalDevice> for PhysicalDevice {
@@ -245,33 +246,33 @@ impl PhysicalDevice {
         let counts =
             limits.framebuffer_color_sample_counts & limits.framebuffer_depth_sample_counts;
 
-        if counts.contains(vk::SampleCountFlags::TYPE_64) {
-            return vk::SampleCountFlags::TYPE_64;
+        if counts.contains(vk::SampleCountFlags::_64) {
+            return vk::SampleCountFlags::_64;
         }
 
-        if counts.contains(vk::SampleCountFlags::TYPE_32) {
-            return vk::SampleCountFlags::TYPE_32;
+        if counts.contains(vk::SampleCountFlags::_32) {
+            return vk::SampleCountFlags::_32;
         }
 
-        if counts.contains(vk::SampleCountFlags::TYPE_16) {
-            return vk::SampleCountFlags::TYPE_16;
+        if counts.contains(vk::SampleCountFlags::_16) {
+            return vk::SampleCountFlags::_16;
         }
 
-        if counts.contains(vk::SampleCountFlags::TYPE_8) {
-            return vk::SampleCountFlags::TYPE_8;
+        if counts.contains(vk::SampleCountFlags::_8) {
+            return vk::SampleCountFlags::_8;
         }
 
-        if counts.contains(vk::SampleCountFlags::TYPE_4) {
-            return vk::SampleCountFlags::TYPE_4;
+        if counts.contains(vk::SampleCountFlags::_4) {
+            return vk::SampleCountFlags::_4;
         }
 
-        if counts.contains(vk::SampleCountFlags::TYPE_2) {
-            return vk::SampleCountFlags::TYPE_2;
+        if counts.contains(vk::SampleCountFlags::_2) {
+            return vk::SampleCountFlags::_2;
         }
 
-        vk::SampleCountFlags::TYPE_1
+        vk::SampleCountFlags::_1
     }
-    pub fn enable_extension_if_present(&mut self, extension: impl Into<Cow<'static, str>>) -> bool {
+    pub fn enable_extension_if_present(&mut self, extension: vk::ExtensionName) -> bool {
         let extension = extension.into();
 
         if self.available_extensions.contains(&extension) {
@@ -281,14 +282,10 @@ impl PhysicalDevice {
         }
     }
 
-    pub fn enable_extensions_if_present<
-        T: Eq + Hash + Into<Cow<'static, str>>,
-        I: IntoIterator<Item = T>,
-    >(
+    pub fn enable_extensions_if_present<I: IntoIterator<Item = vk::ExtensionName>>(
         &mut self,
         extensions: I,
     ) -> bool {
-        let extensions = extensions.into_iter().map(Into::into);
         let extensions = BTreeSet::from_iter(extensions);
         let intersection: BTreeSet<_> = self
             .available_extensions
@@ -308,15 +305,15 @@ impl PhysicalDevice {
 // TODO: proper transmute via ash
 //region vulkanfeatures
 #[derive(Debug, Clone)]
-pub enum VulkanPhysicalDeviceFeature2<'a> {
-    PhysicalDeviceVulkan11(vk::PhysicalDeviceVulkan11Features<'a>),
-    PhysicalDeviceVulkan12(vk::PhysicalDeviceVulkan12Features<'a>),
-    PhysicalDeviceVulkan13(vk::PhysicalDeviceVulkan13Features<'a>),
+pub enum VulkanPhysicalDeviceFeature2 {
+    PhysicalDeviceVulkan11(vk::PhysicalDeviceVulkan11Features),
+    PhysicalDeviceVulkan12(vk::PhysicalDeviceVulkan12Features),
+    PhysicalDeviceVulkan13(vk::PhysicalDeviceVulkan13Features),
 }
 
 fn match_features(
-    requested: &VulkanPhysicalDeviceFeature2<'_>,
-    supported: &VulkanPhysicalDeviceFeature2<'_>,
+    requested: &VulkanPhysicalDeviceFeature2,
+    supported: &VulkanPhysicalDeviceFeature2,
 ) -> bool {
     assert_eq!(requested.s_type(), supported.s_type());
 
@@ -325,13 +322,13 @@ fn match_features(
             VulkanPhysicalDeviceFeature2::PhysicalDeviceVulkan11(r),
             VulkanPhysicalDeviceFeature2::PhysicalDeviceVulkan11(s),
         ) => {
-            if r.storage_buffer16_bit_access == vk::TRUE
-                && s.storage_buffer16_bit_access == vk::FALSE
+            if r.storage_buffer_16bit_access == vk::TRUE
+                && s.storage_buffer_16bit_access == vk::FALSE
             {
                 return false;
             }
-            if r.uniform_and_storage_buffer16_bit_access == vk::TRUE
-                && s.uniform_and_storage_buffer16_bit_access == vk::FALSE
+            if r.uniform_and_storage_buffer_16bit_access == vk::TRUE
+                && s.uniform_and_storage_buffer_16bit_access == vk::FALSE
             {
                 return false;
             }
@@ -383,12 +380,12 @@ fn match_features(
             if r.draw_indirect_count == vk::TRUE && s.draw_indirect_count == vk::FALSE {
                 return false;
             }
-            if r.storage_buffer8_bit_access == vk::TRUE && s.storage_buffer8_bit_access == vk::FALSE
+            if r.storage_buffer_8bit_access == vk::TRUE && s.storage_buffer_8bit_access == vk::FALSE
             {
                 return false;
             }
-            if r.uniform_and_storage_buffer8_bit_access == vk::TRUE
-                && s.uniform_and_storage_buffer8_bit_access == vk::FALSE
+            if r.uniform_and_storage_buffer_8bit_access == vk::TRUE
+                && s.uniform_and_storage_buffer_8bit_access == vk::FALSE
             {
                 return false;
             }
@@ -650,7 +647,7 @@ fn match_features(
         _ => unsafe { unreachable_unchecked() },
     }
 }
-impl<'a> VulkanPhysicalDeviceFeature2<'a> {
+impl<'a> VulkanPhysicalDeviceFeature2 {
     fn as_mut(&mut self) -> &mut dyn vk::ExtendsPhysicalDeviceFeatures2 {
         match self {
             Self::PhysicalDeviceVulkan11(f) => f,
@@ -659,7 +656,7 @@ impl<'a> VulkanPhysicalDeviceFeature2<'a> {
         }
     }
 
-    fn combine(&mut self, other: &VulkanPhysicalDeviceFeature2<'a>) {
+    fn combine(&mut self, other: &VulkanPhysicalDeviceFeature2) {
         assert_eq!(self.s_type(), other.s_type());
 
         match (self, other) {
@@ -667,9 +664,9 @@ impl<'a> VulkanPhysicalDeviceFeature2<'a> {
                 Self::PhysicalDeviceVulkan11(f),
                 VulkanPhysicalDeviceFeature2::PhysicalDeviceVulkan11(other),
             ) => {
-                f.storage_buffer16_bit_access |= other.storage_buffer16_bit_access;
-                f.uniform_and_storage_buffer16_bit_access |=
-                    other.uniform_and_storage_buffer16_bit_access;
+                f.storage_buffer_16bit_access |= other.storage_buffer_16bit_access;
+                f.uniform_and_storage_buffer_16bit_access |=
+                    other.uniform_and_storage_buffer_16bit_access;
                 f.storage_push_constant16 |= other.storage_push_constant16;
                 f.storage_input_output16 |= other.storage_input_output16;
                 f.multiview |= other.multiview;
@@ -687,9 +684,9 @@ impl<'a> VulkanPhysicalDeviceFeature2<'a> {
             ) => {
                 f.sampler_mirror_clamp_to_edge |= other.sampler_mirror_clamp_to_edge;
                 f.draw_indirect_count |= other.draw_indirect_count;
-                f.storage_buffer8_bit_access |= other.storage_buffer8_bit_access;
-                f.uniform_and_storage_buffer8_bit_access |=
-                    other.uniform_and_storage_buffer8_bit_access;
+                f.storage_buffer_8bit_access |= other.storage_buffer_8bit_access;
+                f.uniform_and_storage_buffer_8bit_access |=
+                    other.uniform_and_storage_buffer_8bit_access;
                 f.storage_push_constant8 |= other.storage_push_constant8;
                 f.shader_buffer_int64_atomics |= other.shader_buffer_int64_atomics;
                 f.shader_shared_int64_atomics |= other.shader_shared_int64_atomics;
@@ -789,44 +786,44 @@ impl<'a> VulkanPhysicalDeviceFeature2<'a> {
     }
 }
 
-impl<'a> From<vk::PhysicalDeviceVulkan11Features<'a>> for VulkanPhysicalDeviceFeature2<'a> {
-    fn from(value: vk::PhysicalDeviceVulkan11Features<'a>) -> Self {
+impl From<vk::PhysicalDeviceVulkan11Features> for VulkanPhysicalDeviceFeature2 {
+    fn from(value: vk::PhysicalDeviceVulkan11Features) -> Self {
         Self::PhysicalDeviceVulkan11(value)
     }
 }
 
-impl<'a> From<vk::PhysicalDeviceVulkan12Features<'a>> for VulkanPhysicalDeviceFeature2<'a> {
-    fn from(value: vk::PhysicalDeviceVulkan12Features<'a>) -> Self {
+impl From<vk::PhysicalDeviceVulkan12Features> for VulkanPhysicalDeviceFeature2 {
+    fn from(value: vk::PhysicalDeviceVulkan12Features) -> Self {
         Self::PhysicalDeviceVulkan12(value)
     }
 }
 
-impl<'a> From<vk::PhysicalDeviceVulkan13Features<'a>> for VulkanPhysicalDeviceFeature2<'a> {
-    fn from(value: vk::PhysicalDeviceVulkan13Features<'a>) -> Self {
+impl From<vk::PhysicalDeviceVulkan13Features> for VulkanPhysicalDeviceFeature2 {
+    fn from(value: vk::PhysicalDeviceVulkan13Features) -> Self {
         Self::PhysicalDeviceVulkan13(value)
     }
 }
 //endregion vulkanfeatures
 
 #[derive(Debug, Clone, Default)]
-struct GenericFeatureChain<'a> {
-    nodes: Vec<VulkanPhysicalDeviceFeature2<'a>>,
+struct GenericFeatureChain {
+    nodes: Vec<VulkanPhysicalDeviceFeature2>,
 }
 
-impl<'a> Deref for GenericFeatureChain<'a> {
-    type Target = Vec<VulkanPhysicalDeviceFeature2<'a>>;
+impl Deref for GenericFeatureChain {
+    type Target = Vec<VulkanPhysicalDeviceFeature2>;
 
     fn deref(&self) -> &Self::Target {
         &self.nodes
     }
 }
 
-impl<'a> GenericFeatureChain<'a> {
+impl GenericFeatureChain {
     fn new() -> Self {
         Self { nodes: vec![] }
     }
 
-    fn add(&mut self, feature: impl Into<VulkanPhysicalDeviceFeature2<'a>> + 'a) {
+    fn add(&mut self, feature: impl Into<VulkanPhysicalDeviceFeature2>) {
         let new_node = feature.into();
 
         for node in &mut self.nodes {
@@ -858,7 +855,7 @@ impl<'a> GenericFeatureChain<'a> {
 }
 
 #[derive(Debug)]
-struct SelectionCriteria<'a> {
+struct SelectionCriteria {
     name: String,
     preferred_device_type: PreferredDeviceType,
     allow_any_type: bool,
@@ -868,17 +865,17 @@ struct SelectionCriteria<'a> {
     require_separate_transfer_queue: bool,
     require_separate_compute_queue: bool,
     required_mem_size: vk::DeviceSize,
-    required_extensions: BTreeSet<String>,
+    required_extensions: BTreeSet<vk::ExtensionName>,
     required_version: u32,
     required_features: vk::PhysicalDeviceFeatures,
     required_formats: Vec<vk::Format>,
-    requested_features_chain: RefCell<GenericFeatureChain<'a>>,
+    requested_features_chain: RefCell<GenericFeatureChain>,
     defer_surface_initialization: bool,
     use_first_gpu_unconditionally: bool,
     enable_portability_subset: bool,
 }
 
-impl Default for SelectionCriteria<'_> {
+impl Default for SelectionCriteria {
     fn default() -> Self {
         Self {
             name: String::new(),
@@ -891,7 +888,7 @@ impl Default for SelectionCriteria<'_> {
             require_separate_compute_queue: false,
             required_mem_size: 0,
             required_extensions: BTreeSet::new(),
-            required_version: vk::API_VERSION_1_0,
+            required_version: vk::make_version(1, 0, 0),
             required_features: vk::PhysicalDeviceFeatures::default(),
             defer_surface_initialization: false,
             use_first_gpu_unconditionally: false,
@@ -905,13 +902,13 @@ impl Default for SelectionCriteria<'_> {
 pub struct PhysicalDeviceSelector {
     instance: Arc<Instance>,
     surface: Option<vk::SurfaceKHR>,
-    selection_criteria: SelectionCriteria<'static>,
+    selection_criteria: SelectionCriteria,
 }
 
 impl PhysicalDeviceSelector {
     pub fn new(instance: Arc<Instance>) -> PhysicalDeviceSelector {
         let enable_portability_subset = cfg!(feature = "portability");
-        let require_present = instance.surface_instance.is_some();
+        let require_present = instance.surface.is_some();
         let required_version = instance.api_version;
         Self {
             surface: instance.surface,
@@ -930,9 +927,7 @@ impl PhysicalDeviceSelector {
         self
     }
 
-    pub fn add_required_extension_feature<
-        T: Into<VulkanPhysicalDeviceFeature2<'static>> + 'static,
-    >(
+    pub fn add_required_extension_feature<T: Into<VulkanPhysicalDeviceFeature2>>(
         self,
         feature: T,
     ) -> Self {
@@ -1001,11 +996,7 @@ impl PhysicalDeviceSelector {
     fn set_is_suitable(&self, device: &mut PhysicalDevice) {
         let criteria = &self.selection_criteria;
 
-        let device_name = device
-            .properties
-            .device_name_as_c_str()
-            .expect("device name should be correct cstr")
-            .to_string_lossy();
+        let device_name = device.properties.device_name.to_string_lossy();
 
         if !criteria.name.is_empty() && Cow::Borrowed(&criteria.name) != device_name {
             #[cfg(feature = "enable_tracing")]
@@ -1062,7 +1053,7 @@ impl PhysicalDeviceSelector {
         );
 
         let present_queue = get_present_queue_index(
-            &self.instance.surface_instance,
+            &self.instance.instance,
             device.physical_device,
             self.surface,
             &device.queue_families,
@@ -1107,13 +1098,11 @@ impl PhysicalDeviceSelector {
         }
 
         if !criteria.defer_surface_initialization && criteria.require_present {
-            let instance = self.instance.as_ref();
-            if let Some((surface_instance, surface)) =
-                instance.surface_instance.as_ref().zip(self.surface)
-            {
+            if let Some(surface) = self.surface {
                 let formats = unsafe {
-                    surface_instance
-                        .get_physical_device_surface_formats(device.physical_device, surface)
+                    self.instance
+                        .instance
+                        .get_physical_device_surface_formats_khr(device.physical_device, surface)
                 };
                 let Ok(formats) = formats else {
                     device.suitable = Suitable::No;
@@ -1121,8 +1110,12 @@ impl PhysicalDeviceSelector {
                 };
 
                 let present_modes = unsafe {
-                    surface_instance
-                        .get_physical_device_surface_present_modes(device.physical_device, surface)
+                    self.instance
+                        .instance
+                        .get_physical_device_surface_present_modes_khr(
+                            device.physical_device,
+                            surface,
+                        )
                 };
                 let Ok(present_modes) = present_modes else {
                     device.suitable = Suitable::No;
@@ -1226,18 +1219,12 @@ impl PhysicalDeviceSelector {
             ..Default::default()
         };
 
-        physical_device.name = physical_device
-            .properties
-            .clone()
-            .device_name_as_c_str()
-            .map_err(anyhow::Error::msg)?
-            .to_string_lossy()
-            .to_string();
+        physical_device.name = physical_device.properties.clone().device_name.to_string();
 
         let available_extensions = unsafe {
             instance
                 .instance
-                .enumerate_device_extension_properties(vk_phys_device)
+                .enumerate_device_extension_properties(vk_phys_device, None)
         };
 
         let Ok(available_extensions) = available_extensions else {
@@ -1246,32 +1233,35 @@ impl PhysicalDeviceSelector {
 
         let available_extensions_names = available_extensions
             .into_iter()
-            .map(|e| {
-                e.extension_name_as_c_str()
-                    .expect("Extension name should be correct null-terminated string")
-                    .to_string_lossy()
-                    .to_string()
-            })
+            .map(|e| e.extension_name)
             .collect::<BTreeSet<_>>();
 
-        physical_device.available_extensions.extend(
-            available_extensions_names
-                .iter()
-                .map(|s| Cow::Owned(s.clone())),
-        );
+        physical_device
+            .available_extensions
+            .extend(available_extensions_names);
 
         physical_device.properties2_ext_enabled = instance.properties2_ext_enabled;
 
         let requested_features_chain = criteria.requested_features_chain.borrow();
-        let instance_is_11 = instance.instance_version >= vk::API_VERSION_1_1;
+        let instance_is_11 = instance.instance_version >= vk::make_version(1, 1, 0);
         if !requested_features_chain.is_empty()
             && (instance_is_11 || instance.properties2_ext_enabled)
         {
             let mut supported_features = requested_features_chain.clone();
-            let mut local_features = vk::PhysicalDeviceFeatures2::default();
+            let mut local_features = vk::PhysicalDeviceFeatures2::builder();
 
             for node in supported_features.nodes.iter_mut() {
-                local_features = local_features.push_next(node.as_mut());
+                match node {
+                    VulkanPhysicalDeviceFeature2::PhysicalDeviceVulkan11(features) => {
+                        local_features.push_next(features)
+                    }
+                    VulkanPhysicalDeviceFeature2::PhysicalDeviceVulkan12(features) => {
+                        local_features.push_next(features)
+                    }
+                    VulkanPhysicalDeviceFeature2::PhysicalDeviceVulkan13(features) => {
+                        local_features.push_next(features)
+                    }
+                };
             }
 
             unsafe {
@@ -1281,7 +1271,7 @@ impl PhysicalDeviceSelector {
                 )
             };
 
-            physical_device.supported_features_chain = supported_features.clone();
+            physical_device.supported_features_chain = requested_features_chain.clone();
         }
 
         Ok(physical_device)
@@ -1306,7 +1296,7 @@ impl PhysicalDeviceSelector {
         let fill_out_phys_dev_with_criteria = |physical_device: &mut PhysicalDevice| {
             physical_device.features = criteria.required_features;
             let mut portability_ext_available = false;
-            let portability_name = vk::KHR_PORTABILITY_SUBSET_NAME.to_string_lossy();
+            let portability_name = vk::KHR_PORTABILITY_ENUMERATION_EXTENSION.name;
             for ext in &physical_device.available_extensions {
                 if criteria.enable_portability_subset && ext == &portability_name {
                     portability_ext_available = true;
@@ -1314,12 +1304,9 @@ impl PhysicalDeviceSelector {
             }
 
             physical_device.extensions_to_enable.clear();
-            physical_device.extensions_to_enable.extend(
-                criteria
-                    .required_extensions
-                    .iter()
-                    .map(|s| Cow::Owned(s.clone())),
-            );
+            physical_device
+                .extensions_to_enable
+                .extend(criteria.required_extensions.clone());
 
             if portability_ext_available {
                 physical_device
@@ -1379,30 +1366,10 @@ impl PhysicalDeviceSelector {
     }
 }
 
-fn cow_to_c_cow(cow: Cow<'_, str>) -> Cow<'_, CStr> {
-    match cow {
-        Cow::Borrowed(s) => {
-            // Check if `s` is a valid C string
-            if let Ok(c_str) = CStr::from_bytes_with_nul(s.as_bytes()) {
-                Cow::Borrowed(c_str)
-            } else {
-                // Convert to CString, appending a null byte
-                let c_string = CString::new(s).expect("Invalid C string");
-                Cow::Owned(c_string)
-            }
-        }
-        Cow::Owned(s) => {
-            // Convert owned String to CString
-            let c_string = CString::new(s).expect("Invalid C string");
-            Cow::Owned(c_string)
-        }
-    }
-}
-
 pub struct DeviceBuilder {
     instance: Arc<Instance>,
     physical_device: PhysicalDevice,
-    allocation_callbacks: Option<AllocationCallbacks<'static>>,
+    allocation_callbacks: Option<AllocationCallbacks>,
     // TODO: pNext chains for features
     // TODO: queue descriptions
 }
@@ -1416,10 +1383,7 @@ impl DeviceBuilder {
         }
     }
 
-    pub fn allocation_callbacks(
-        mut self,
-        allocation_callbacks: AllocationCallbacks<'static>,
-    ) -> Self {
+    pub fn allocation_callbacks(mut self, allocation_callbacks: AllocationCallbacks) -> Self {
         self.allocation_callbacks.replace(allocation_callbacks);
         self
     }
@@ -1437,39 +1401,39 @@ impl DeviceBuilder {
 
         let queue_create_infos = queue_descriptions
             .iter()
-            .map(|(index, priorities)| {
-                vk::DeviceQueueCreateInfo::default()
-                    .queue_family_index(*index as u32)
-                    .queue_priorities(priorities)
+            .map(|(index, priorities)| vk::DeviceQueueCreateInfo {
+                queue_family_index: *index as u32,
+                queue_priorities: priorities.as_ptr(),
+                queue_count: priorities.len() as u32,
+                ..Default::default()
             })
             .collect::<Vec<_>>();
-        let extensions_to_enable = self
-            .physical_device
-            .extensions_to_enable
-            .iter()
-            .map(|e| cow_to_c_cow(e.clone()))
-            .collect::<Vec<_>>();
 
-        let mut extensions_to_enable = extensions_to_enable
-            .iter()
-            .map(|e| e.as_ptr())
-            .collect::<Vec<_>>();
         if self.physical_device.surface.is_some()
             || self.physical_device.defer_surface_initialization
         {
-            extensions_to_enable.push(vk::KHR_SWAPCHAIN_NAME.as_ptr());
+            self.physical_device
+                .extensions_to_enable
+                .insert(vk::KHR_SWAPCHAIN_EXTENSION.name);
         }
 
-        let mut device_create_info = vk::DeviceCreateInfo::default()
-            .queue_create_infos(&queue_create_infos)
-            .enabled_extension_names(&extensions_to_enable);
+        let mut device_create_info = vk::DeviceCreateInfo::builder();
+        device_create_info.queue_create_infos(&queue_create_infos);
+        device_create_info.enabled_extension_names(
+            &self
+                .physical_device
+                .extensions_to_enable
+                .iter()
+                .map(|ext| ext.as_ptr())
+                .collect::<Vec<_>>(),
+        );
 
         let requested_features_chain = &mut self.physical_device.requested_features_chain;
 
-        let mut features2 =
-            vk::PhysicalDeviceFeatures2::default().features(self.physical_device.features);
+        let mut features2 = vk::PhysicalDeviceFeatures2::builder();
+        features2.features(self.physical_device.features);
 
-        if self.instance.instance_version >= vk::API_VERSION_1_1
+        if self.instance.instance_version >= vk::make_version(1, 1, 0)
             || self.physical_device.properties2_ext_enabled
         {
             device_create_info = device_create_info.push_next(&mut features2);
@@ -1497,15 +1461,16 @@ impl DeviceBuilder {
             )
         }?;
 
+        let instance = self.instance;
         let physical_device = self.physical_device;
 
         let surface = physical_device.surface;
         let allocation_callbacks = self.allocation_callbacks;
 
         Ok(Device {
+            instance,
             device,
             surface,
-            surface_instance: self.instance.surface_instance.clone(),
             physical_device,
             allocation_callbacks,
         })
@@ -1513,11 +1478,11 @@ impl DeviceBuilder {
 }
 
 pub struct Device {
-    device: ash::Device,
+    instance: Arc<Instance>,
+    device: vulkanalia::Device,
     physical_device: PhysicalDevice,
     surface: Option<vk::SurfaceKHR>,
-    surface_instance: Option<khr::surface::Instance>,
-    allocation_callbacks: Option<AllocationCallbacks<'static>>,
+    allocation_callbacks: Option<AllocationCallbacks>,
 }
 
 #[derive(Debug, Clone, PartialOrd, PartialEq, Eq, Ord)]
@@ -1529,7 +1494,7 @@ pub enum QueueType {
 }
 
 impl Device {
-    pub fn device(&self) -> &ash::Device {
+    pub fn device(&self) -> &vulkanalia::Device {
         &self.device
     }
 
@@ -1540,7 +1505,7 @@ impl Device {
     pub fn get_queue(&self, queue: QueueType) -> crate::Result<(usize, vk::Queue)> {
         let index = match queue {
             QueueType::Present => get_present_queue_index(
-                &self.surface_instance,
+                &self.instance.instance,
                 self.physical_device.physical_device,
                 self.surface,
                 &self.physical_device.queue_families,
@@ -1587,7 +1552,7 @@ impl Device {
             _ => return Err(crate::QueueError::InvalidQueueFamilyIndex.into()),
         }?;
 
-        let info = vk::DeviceQueueInfo2::default()
+        let info = vk::DeviceQueueInfo2::builder()
             .queue_family_index(index as _)
             .queue_index(0);
 
@@ -1602,14 +1567,14 @@ impl Device {
     }
 }
 
-impl AsRef<ash::Device> for Device {
-    fn as_ref(&self) -> &ash::Device {
+impl AsRef<vulkanalia::Device> for Device {
+    fn as_ref(&self) -> &vulkanalia::Device {
         &self.device
     }
 }
 
 impl Deref for Device {
-    type Target = ash::Device;
+    type Target = vulkanalia::Device;
 
     fn deref(&self) -> &Self::Target {
         &self.device
