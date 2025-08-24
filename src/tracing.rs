@@ -1,28 +1,28 @@
-use ash::vk;
-use ash::vk::DebugUtilsMessageSeverityFlagsEXT;
 use std::borrow::Cow;
 use std::ffi;
+use vulkanalia::vk;
+use vulkanalia::vk::DebugUtilsMessageSeverityFlagsEXT;
 
 pub unsafe extern "system" fn vulkan_tracing_callback(
     message_severity: DebugUtilsMessageSeverityFlagsEXT,
     _message_type: vk::DebugUtilsMessageTypeFlagsEXT,
-    p_callback_data: *const vk::DebugUtilsMessengerCallbackDataEXT<'_>,
+    p_callback_data: *const vk::DebugUtilsMessengerCallbackDataEXT,
     _user_data: *mut std::os::raw::c_void,
 ) -> vk::Bool32 {
     unsafe {
         let callback_data = *p_callback_data;
         let message_id_number = callback_data.message_id_number;
 
-        let message_id_name = if callback_data.p_message_id_name.is_null() {
+        let message_id_name = if callback_data.message_id_name.is_null() {
             Cow::from("")
         } else {
-            ffi::CStr::from_ptr(callback_data.p_message_id_name).to_string_lossy()
+            ffi::CStr::from_ptr(callback_data.message_id_name).to_string_lossy()
         };
 
-        let message = if callback_data.p_message.is_null() {
+        let message = if callback_data.message.is_null() {
             Cow::from("")
         } else {
-            ffi::CStr::from_ptr(callback_data.p_message).to_string_lossy()
+            ffi::CStr::from_ptr(callback_data.message).to_string_lossy()
         };
 
         match message_severity {

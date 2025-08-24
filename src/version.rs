@@ -1,5 +1,5 @@
-use ash::vk;
 use std::fmt::{Display, Formatter};
+use vulkanalia::vk;
 
 pub struct Version(u32);
 
@@ -8,9 +8,9 @@ impl Display for Version {
         write!(
             f,
             "{}.{}.{}",
-            vk::api_version_major(self.0),
-            vk::api_version_minor(self.0),
-            vk::api_version_patch(self.0)
+            vk::version_major(self.0),
+            vk::version_minor(self.0),
+            vk::version_patch(self.0)
         )
     }
 }

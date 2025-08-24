@@ -2,13 +2,17 @@ use crate::system_info::{DEBUG_UTILS_EXT_NAME, SystemInfo, VALIDATION_LAYER_NAME
 use raw_window_handle::{HasDisplayHandle, HasWindowHandle};
 use std::borrow::Cow;
 use std::ffi;
-use std::ffi::{CString, c_void};
+use std::ffi::c_void;
+use std::fmt::Debug;
 use std::sync::Arc;
 use vulkanalia::vk::{
     self, EntryV1_1, ExtDebugUtilsExtension, HasBuilder, InstanceV1_0, KhrSurfaceExtension,
 };
 use vulkanalia::vk::{AllocationCallbacks, DebugUtilsMessengerEXT};
 use vulkanalia::window as vk_window;
+
+pub trait WindowTraits: HasDisplayHandle + HasWindowHandle + Debug {}
+impl<T> WindowTraits for T where T: HasDisplayHandle + HasWindowHandle + Debug {}
 
 unsafe extern "system" fn vulkan_debug_callback(
     message_severity: vk::DebugUtilsMessageSeverityFlagsEXT,
@@ -239,10 +243,7 @@ impl InstanceBuilder {
     }
 
     #[cfg_attr(feature = "enable_tracing", tracing::instrument(skip(self)))]
-    pub fn build<W>(self, window: Option<Arc<W>>) -> crate::Result<Arc<Instance>>
-    where
-        W: HasDisplayHandle + HasWindowHandle + 'static,
-    {
+    pub fn build(self, window: Option<Arc<dyn WindowTraits>>) -> crate::Result<Arc<Instance>> {
         let system_info = SystemInfo::get_system_info()?;
 
         let instance_version = {
@@ -280,9 +281,9 @@ impl InstanceBuilder {
         {
             tracing::info!(
                 "Instance version: {}.{}.{}",
-                vk::api_version_major(instance_version),
-                vk::api_version_minor(instance_version),
-                vk::api_version_patch(instance_version)
+                vk::version_major(instance_version),
+                vk::version_minor(instance_version),
+                vk::version_patch(instance_version)
             );
         }
 
@@ -301,13 +302,13 @@ impl InstanceBuilder {
             tracing::info!("api_version: {}", version);
         }
 
-        let app_name = CString::new(self.app_name).map_err(anyhow::Error::msg)?;
-        let engine_name = CString::new(self.engine_name).map_err(anyhow::Error::msg)?;
+        let app_name = self.app_name;
+        let engine_name = self.engine_name;
 
         let app_info = vk::ApplicationInfo {
-            application_name: app_name.as_ptr(),
+            application_name: app_name.as_bytes().as_ptr() as _,
             application_version: self.application_version,
-            engine_name: engine_name.as_ptr(),
+            engine_name: engine_name.as_bytes().as_ptr() as _,
             engine_version: self.engine_version,
             api_version: api_version,
             ..Default::default()
@@ -327,16 +328,16 @@ Application info: {{
 }}
             "#,
                 app_name,
-                vk::api_version_major(self.application_version),
-                vk::api_version_minor(self.application_version),
-                vk::api_version_patch(self.application_version),
+                vk::version_major(self.application_version),
+                vk::version_minor(self.application_version),
+                vk::version_patch(self.application_version),
                 engine_name,
-                vk::api_version_major(self.engine_version),
-                vk::api_version_minor(self.engine_version),
-                vk::api_version_patch(self.engine_version),
-                vk::api_version_major(api_version),
-                vk::api_version_minor(api_version),
-                vk::api_version_patch(api_version),
+                vk::version_major(self.engine_version),
+                vk::version_minor(self.engine_version),
+                vk::version_patch(self.engine_version),
+                vk::version_major(api_version),
+                vk::version_minor(api_version),
+                vk::version_patch(api_version),
             )
         }
 
@@ -388,7 +389,7 @@ Application info: {{
         }
 
         #[cfg(feature = "enable_tracing")]
-        tracing::trace!(?cstr_enabled_extensions);
+        tracing::trace!(?enabled_extensions);
 
         let all_extensions_supported = system_info.are_extensions_available(&enabled_extensions)?;
         if !all_extensions_supported {

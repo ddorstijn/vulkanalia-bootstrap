@@ -17,8 +17,6 @@ pub enum Error {
     Vulkan(#[from] vulkanalia::vk::Result),
     #[error("Vulkan error: {0}")]
     VulkanErr(#[from] vk::ErrorCode),
-    #[error(transparent)]
-    Other(#[from] anyhow::Error),
 }
 
 #[derive(Debug, PartialOrd, PartialEq, Eq, Ord, Error)]

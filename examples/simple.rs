@@ -1,12 +1,11 @@
-use ash_bootstrap::{
-    DeviceBuilder, InstanceBuilder, PhysicalDeviceSelector, PreferredDeviceType, QueueType,
-    SwapchainBuilder,
-};
-use raw_window_handle::{HasDisplayHandle, HasWindowHandle};
 use std::sync::Arc;
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
 use tracing_subscriber::{EnvFilter, fmt};
+use vulkanalia_bootstrap::{
+    DeviceBuilder, InstanceBuilder, PhysicalDeviceSelector, PreferredDeviceType, QueueType,
+    SwapchainBuilder,
+};
 use winit::application::ApplicationHandler;
 use winit::event::WindowEvent;
 use winit::event_loop::{ActiveEventLoop, EventLoop};
@@ -14,33 +13,26 @@ use winit::window::{Window, WindowAttributes, WindowId};
 
 #[derive(Default, Debug)]
 struct App {
-    window: Option<Window>,
+    window: Option<Arc<Window>>,
 }
 
 impl ApplicationHandler for App {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
-        let init_window = || -> anyhow::Result<Window> {
-            let window = event_loop.create_window(WindowAttributes::default())?;
+        let init_window = || -> anyhow::Result<Arc<Window>> {
+            let window = Arc::new(event_loop.create_window(WindowAttributes::default())?);
 
-            let _window_handle = window.window_handle()?;
-            let _display_handle = window.display_handle().unwrap();
-
-            let instance = InstanceBuilder::new(None)
+            let instance = InstanceBuilder::new()
                 .app_name("Example Vulkan Application")
                 .engine_name("Example Vulkan Engine")
                 .request_validation_layers(true)
                 .use_default_tracing_messenger()
-                .build()?;
+                .build(Some(window.clone()))?;
 
             let physical_device = PhysicalDeviceSelector::new(instance.clone())
                 .preferred_device_type(PreferredDeviceType::Discrete)
                 .select()?;
 
             let device = Arc::new(DeviceBuilder::new(physical_device, instance.clone()).build()?);
-
-            // You can get the inner handle that is used by vulkan
-            // Or you can just pass it where the device handle is expected, because it implements AsRef.
-            let _device_handle = device.handle();
 
             let (_graphics_queue_index, _graphics_queue) = device.get_queue(QueueType::Graphics)?;
             let swapchain_builder = SwapchainBuilder::new(instance.clone(), device.clone());
