@@ -1,29 +1,32 @@
-# `Ash Bootstrap`&emsp; [![Latest Version]][crates.io] [![Rustc Version 1.36+]][rustc] ![license]
+# `Vulkanalia Bootstrap`&emsp; [![Latest Version]][crates.io] [![Rustc Version 1.36+]][rustc] ![license]
 
-[Latest Version]: https://img.shields.io/crates/v/ash_bootstrap.svg
-[crates.io]: https://crates.io/crates/ash\_bootstrap
+[Latest Version]: https://img.shields.io/crates/v/Vulkanalia_bootstrap.svg
+[crates.io]: https://crates.io/crates/Vulkanalia_bootstrap
 [Rustc Version 1.36+]: https://img.shields.io/badge/rustc-1.85+-lightgray.svg
 [rustc]: https://blog.rust-lang.org/2025/02/20/Rust-1.85.0/
 [license]: https://img.shields.io/badge/license-Apache--2.0_OR_MIT-blue
 
-**Ash Bootstrap** is a utility library that jump starts initialization of Vulkan via the Ash bindings.
+**Vulkanalia Bootstrap** is a utility library that jump starts initialization of Vulkan via the Vulkanalia bindings.
+
+**Note:** This is a quick and dirty fork of ash bootrstrap. Feel free to use it as a quick starter. I will try to keep it somewhat up-to-date with ash-bootrstrap. Feel free to send improvements through a pull-request.
 
 ```toml
 [dependencies]
-ash_bootstrap = "0.1.3"
+vulkanalia_bootstrap = "0.1.3"
 ```
 
-
 ## Features
+
 - Streamlined Vulkan initialization: Simplifies instance, device, and queue setup
 
-- Window integration: Built-in support for surface creation via ash-window
+- Window integration: Built-in support for surface creation via vulkanalia::window
 
 - Tracing support: Optional integration with tracing crate
 
 - Portability: macOS compatibility via portability feature
 
 ## Usage examples
+
 ```rust
 fn main() -> anyhow::Result<()> {
     let instance = InstanceBuilder::new(None)
@@ -58,4 +61,3 @@ fn main() -> anyhow::Result<()> {
 ```
 
 For more examples make sure to check `examples` directory.
-
