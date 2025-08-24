@@ -4,7 +4,9 @@ use std::borrow::Cow;
 use std::ffi;
 use std::ffi::{CString, c_void};
 use std::sync::Arc;
-use vulkanalia::vk::{self, EntryV1_1, HasBuilder, InstanceV1_0, KhrSurfaceExtension};
+use vulkanalia::vk::{
+    self, EntryV1_1, ExtDebugUtilsExtension, HasBuilder, InstanceV1_0, KhrSurfaceExtension,
+};
 use vulkanalia::vk::{AllocationCallbacks, DebugUtilsMessengerEXT};
 use vulkanalia::window as vk_window;
 
@@ -352,7 +354,7 @@ Application info: {{
 
         let properties2_ext_enabled = api_version < vk::make_version(1, 1, 0)
             && system_info
-                .is_extension_available(vk::KHR_GET_PHYSICAL_DEVICE_PROPERTIES2_EXTENSION.name)?;
+                .is_extension_available(&vk::KHR_GET_PHYSICAL_DEVICE_PROPERTIES2_EXTENSION.name)?;
 
         if properties2_ext_enabled {
             enabled_extensions.push(vk::KHR_GET_PHYSICAL_DEVICE_PROPERTIES2_EXTENSION.name);
@@ -367,14 +369,14 @@ Application info: {{
         }
 
         if !self.headless_context {
-            if let Some(window) = window {
+            if let Some(window) = window.clone() {
                 let surface_extensions: Vec<vk::ExtensionName> =
                     vk_window::get_required_instance_extensions(&window)
                         .into_iter()
                         .map(|ext| **ext)
                         .collect();
 
-                if !system_info.are_extensions_available(surface_extensions)? {
+                if !system_info.are_extensions_available(&surface_extensions)? {
                     return Err(crate::InstanceError::WindowingExtensionsNotPresent(
                         surface_extensions,
                     )
@@ -388,7 +390,7 @@ Application info: {{
         #[cfg(feature = "enable_tracing")]
         tracing::trace!(?cstr_enabled_extensions);
 
-        let all_extensions_supported = system_info.are_extensions_available(enabled_extensions)?;
+        let all_extensions_supported = system_info.are_extensions_available(&enabled_extensions)?;
         if !all_extensions_supported {
             return Err(
                 crate::InstanceError::RequestedExtensionsNotPresent(enabled_extensions).into(),
@@ -409,40 +411,29 @@ Application info: {{
             return Err(crate::InstanceError::RequestedLayersNotPresent(enabled_layers).into());
         };
 
-        let mut messenger_create_info = vk::DebugUtilsMessengerCreateInfoEXT::default();
-        if self.use_debug_messenger {
-            messenger_create_info.message_severity = self.debug_message_severity;
-            messenger_create_info.message_type = self.debug_message_type;
-            messenger_create_info.user_callback = self.debug_callback;
-            messenger_create_info.user_data = self.debug_user_data.into_inner();
-
-            #[cfg(feature = "enable_tracing")]
-            tracing::trace!(?self.debug_callback, "Using debug messenger");
-        };
-
         let instance_create_flags = if cfg!(feature = "portability") {
             self.flags | vk::InstanceCreateFlags::ENUMERATE_PORTABILITY_KHR
         } else {
             self.flags
         };
 
-        let instance_create_info = vk::InstanceCreateInfo::builder()
+        let enabled_extension_ptr = enabled_extensions
+            .iter()
+            .map(|e| e.as_ptr())
+            .collect::<Vec<_>>();
+
+        let enabled_layers_ptr = enabled_layers
+            .iter()
+            .map(|e| e.as_ptr())
+            .collect::<Vec<_>>();
+
+        let mut instance_create_info = vk::InstanceCreateInfo::builder()
             .flags(instance_create_flags)
             .application_info(&app_info)
-            .enabled_extension_names(
-                &enabled_extensions
-                    .iter()
-                    .map(|e| e.as_ptr())
-                    .collect::<Vec<_>>(),
-            )
-            .enabled_layer_names(
-                &enabled_layers
-                    .iter()
-                    .map(|e| e.as_ptr())
-                    .collect::<Vec<_>>(),
-            );
+            .enabled_extension_names(&enabled_extension_ptr)
+            .enabled_layer_names(&enabled_layers_ptr);
 
-        let features = vk::ValidationFeaturesEXT::builder()
+        let mut features = vk::ValidationFeaturesEXT::builder()
             .disabled_validation_features(&self.disabled_validation_features)
             .enabled_validation_features(&self.enabled_validation_features);
 
@@ -469,24 +460,27 @@ Application info: {{
         #[cfg(feature = "enable_tracing")]
         tracing::info!("Created vkInstance");
 
-        let mut debug_loader = None;
         let mut debug_messenger = None;
+        let mut debug_user_data = self.debug_user_data.into_inner();
 
         if self.use_debug_messenger {
-            let loader = debug_utils::Instance::new(&system_info.entry, &instance);
-            let messenger = unsafe {
-                loader.create_debug_utils_messenger(
-                    &messenger_create_info,
-                    self.allocation_callbacks.as_ref(),
-                )
-            }?;
+            let messenger_create_info = vk::DebugUtilsMessengerCreateInfoEXT::builder()
+                .message_severity(self.debug_message_severity)
+                .message_type(self.debug_message_type)
+                .user_callback(self.debug_callback)
+                .user_data(&mut debug_user_data);
 
-            debug_loader.replace(loader);
+            #[cfg(feature = "enable_tracing")]
+            tracing::trace!(?self.debug_callback, "Using debug messenger");
+
+            let messenger =
+                unsafe { instance.create_debug_utils_messenger_ext(&messenger_create_info, None) }?;
+
             debug_messenger.replace(messenger);
         };
 
         let mut surface = None;
-        if let Some(window) = window {
+        if let Some(window) = window.clone() {
             surface = Some(unsafe { vk_window::create_surface(&instance, &window, &window)? });
             #[cfg(feature = "enable_tracing")]
             tracing::info!("Created vkSurfaceKhr")
@@ -499,7 +493,6 @@ Application info: {{
             instance_version,
             api_version,
             properties2_ext_enabled,
-            debug_loader,
             debug_messenger,
             _system_info: system_info,
         }))
@@ -513,7 +506,6 @@ pub struct Instance {
     pub(crate) instance_version: u32,
     pub api_version: u32,
     pub(crate) properties2_ext_enabled: bool,
-    pub(crate) debug_loader: Option<debug_utils::Instance>,
     pub(crate) debug_messenger: Option<DebugUtilsMessengerEXT>,
     _system_info: SystemInfo,
 }
@@ -521,13 +513,9 @@ pub struct Instance {
 impl Instance {
     pub fn destroy(&self) {
         unsafe {
-            if let Some((debug_messenger, debug_loader)) = self
-                .debug_messenger
-                .as_ref()
-                .zip(self.debug_loader.as_ref())
-            {
-                debug_loader.destroy_debug_utils_messenger(
-                    *debug_messenger,
+            if let Some(debug_messenger) = self.debug_messenger {
+                self.instance.destroy_debug_utils_messenger_ext(
+                    debug_messenger,
                     self.allocation_callbacks.as_ref(),
                 );
             }

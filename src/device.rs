@@ -648,14 +648,6 @@ fn match_features(
     }
 }
 impl<'a> VulkanPhysicalDeviceFeature2 {
-    fn as_mut(&mut self) -> &mut dyn vk::ExtendsPhysicalDeviceFeatures2 {
-        match self {
-            Self::PhysicalDeviceVulkan11(f) => f,
-            Self::PhysicalDeviceVulkan12(f) => f,
-            Self::PhysicalDeviceVulkan13(f) => f,
-        }
-    }
-
     fn combine(&mut self, other: &VulkanPhysicalDeviceFeature2) {
         assert_eq!(self.s_type(), other.s_type());
 

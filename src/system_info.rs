@@ -90,9 +90,9 @@ impl SystemInfo {
         })
     }
 
-    pub fn is_extension_available(&self, extension: vk::ExtensionName) -> crate::Result<bool> {
+    pub fn is_extension_available(&self, extension: &vk::ExtensionName) -> crate::Result<bool> {
         for ext in &self.available_extensions {
-            if ext.extension_name == extension {
+            if ext.extension_name == *extension {
                 return Ok(true);
             }
         }
@@ -100,9 +100,9 @@ impl SystemInfo {
         Ok(false)
     }
 
-    pub fn are_extensions_available<I: IntoIterator<Item = vk::ExtensionName>>(
+    pub fn are_extensions_available(
         &self,
-        extensions: I,
+        extensions: &Vec<vk::ExtensionName>,
     ) -> crate::Result<bool> {
         let mut all_found = true;
         for ext in extensions {
