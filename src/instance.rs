@@ -99,10 +99,12 @@ pub struct InstanceBuilder {
     // TODO: make typesafe
     use_debug_messenger: bool,
     headless_context: bool,
+
+    window: Option<Arc<dyn WindowTraits>>,
 }
 
 impl InstanceBuilder {
-    pub fn new() -> Self {
+    pub fn new(window: Option<Arc<dyn WindowTraits>>) -> Self {
         Self {
             app_name: "".to_string(),
             engine_name: "".to_string(),
@@ -128,6 +130,7 @@ impl InstanceBuilder {
             enable_validation_layers: false,
             use_debug_messenger: false,
             headless_context: false,
+            window,
         }
     }
 
@@ -243,7 +246,7 @@ impl InstanceBuilder {
     }
 
     #[cfg_attr(feature = "enable_tracing", tracing::instrument(skip(self)))]
-    pub fn build(self, window: Option<Arc<dyn WindowTraits>>) -> crate::Result<Arc<Instance>> {
+    pub fn build(self) -> crate::Result<Arc<Instance>> {
         let system_info = SystemInfo::get_system_info()?;
 
         let instance_version = {
@@ -370,7 +373,7 @@ Application info: {{
         }
 
         if !self.headless_context {
-            if let Some(window) = window.clone() {
+            if let Some(window) = self.window.clone() {
                 let surface_extensions: Vec<vk::ExtensionName> =
                     vk_window::get_required_instance_extensions(&window)
                         .into_iter()
@@ -481,7 +484,7 @@ Application info: {{
         };
 
         let mut surface = None;
-        if let Some(window) = window.clone() {
+        if let Some(window) = self.window.clone() {
             surface = Some(unsafe { vk_window::create_surface(&instance, &window, &window)? });
             #[cfg(feature = "enable_tracing")]
             tracing::info!("Created vkSurfaceKhr")

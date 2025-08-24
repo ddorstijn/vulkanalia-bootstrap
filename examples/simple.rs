@@ -21,12 +21,12 @@ impl ApplicationHandler for App {
         let init_window = || -> anyhow::Result<Arc<Window>> {
             let window = Arc::new(event_loop.create_window(WindowAttributes::default())?);
 
-            let instance = InstanceBuilder::new()
+            let instance = InstanceBuilder::new(Some(window.clone()))
                 .app_name("Example Vulkan Application")
                 .engine_name("Example Vulkan Engine")
                 .request_validation_layers(true)
                 .use_default_tracing_messenger()
-                .build(Some(window.clone()))?;
+                .build()?;
 
             let physical_device = PhysicalDeviceSelector::new(instance.clone())
                 .preferred_device_type(PreferredDeviceType::Discrete)
