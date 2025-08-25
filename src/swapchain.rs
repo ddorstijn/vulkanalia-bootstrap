@@ -503,10 +503,8 @@ impl Swapchain {
     pub fn get_image_views(&self) -> crate::Result<Vec<vk::ImageView>> {
         let images = self.get_images()?;
 
-        let mut desired_flags = vk::ImageViewUsageCreateInfo {
-            usage: self.image_usage_flags,
-            ..Default::default()
-        };
+        let mut desired_flags =
+            vk::ImageViewUsageCreateInfo::builder().usage(self.image_usage_flags);
 
         let views: Vec<_> = images
             .into_iter()

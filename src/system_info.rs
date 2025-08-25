@@ -56,7 +56,7 @@ impl SystemInfo {
             unsafe { entry.enumerate_instance_extension_properties(None) }?;
 
         for ext in &available_extensions {
-            if ext.extension_name.to_string_lossy() == DEBUG_UTILS_EXT_NAME.to_string_lossy() {
+            if ext.extension_name == DEBUG_UTILS_EXT_NAME {
                 debug_utils_available = true;
             }
         }

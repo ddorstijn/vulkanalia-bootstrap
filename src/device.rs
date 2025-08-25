@@ -1445,6 +1445,8 @@ impl DeviceBuilder {
             }
         }
 
+        dbg!(device_create_info);
+
         let device = unsafe {
             self.instance.instance.create_device(
                 self.physical_device.physical_device,
