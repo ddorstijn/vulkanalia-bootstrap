@@ -5,8 +5,6 @@ mod swapchain;
 mod system_info;
 #[cfg(feature = "enable_tracing")]
 mod tracing;
-#[cfg(feature = "enable_tracing")]
-mod version;
 
 pub use device::{
     Device, DeviceBuilder, PhysicalDevice, PhysicalDeviceSelector, PreferredDeviceType, QueueType,

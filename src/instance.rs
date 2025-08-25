@@ -71,8 +71,8 @@ pub struct InstanceBuilder {
     // VkApplicationInfo
     app_name: String,
     engine_name: String,
-    application_version: u32,
-    engine_version: u32,
+    application_version: Version,
+    engine_version: Version,
     minimum_instance_version: Version,
     required_instance_version: Version,
 
@@ -108,8 +108,8 @@ impl InstanceBuilder {
         Self {
             app_name: "".to_string(),
             engine_name: "".to_string(),
-            application_version: 0,
-            engine_version: 0,
+            application_version: Version::new(0, 0, 0),
+            engine_version: Version::new(0, 0, 0),
             minimum_instance_version: Version::V1_0_0,
             required_instance_version: Version::V1_0_0,
             layers: vec![],
@@ -144,12 +144,12 @@ impl InstanceBuilder {
         self
     }
 
-    pub fn app_version(mut self, version: u32) -> Self {
+    pub fn app_version(mut self, version: Version) -> Self {
         self.application_version = version;
         self
     }
 
-    pub fn engine_version(mut self, version: u32) -> Self {
+    pub fn engine_version(mut self, version: Version) -> Self {
         self.engine_version = version;
         self
     }
@@ -285,9 +285,9 @@ impl InstanceBuilder {
         {
             tracing::info!(
                 "Instance version: {}.{}.{}",
-                vk::version_major(instance_version),
-                vk::version_minor(instance_version),
-                vk::version_patch(instance_version)
+                instance_version.major,
+                instance_version.minor,
+                instance_version.patch
             );
         }
 
@@ -301,9 +301,7 @@ impl InstanceBuilder {
         };
         #[cfg(feature = "enable_tracing")]
         {
-            use crate::version::Version;
-            let version = Version::new(api_version);
-            tracing::info!("api_version: {}", version);
+            tracing::info!("api_version: {}", api_version);
         }
 
         let app_name = self.app_name;
@@ -311,9 +309,9 @@ impl InstanceBuilder {
 
         let app_info = vk::ApplicationInfo {
             application_name: app_name.as_bytes().as_ptr() as _,
-            application_version: self.application_version,
+            application_version: self.application_version.into(),
             engine_name: engine_name.as_bytes().as_ptr() as _,
-            engine_version: self.engine_version,
+            engine_version: self.engine_version.into(),
             api_version: api_version.into(),
             ..Default::default()
         };
@@ -332,16 +330,16 @@ Application info: {{
 }}
             "#,
                 app_name,
-                vk::version_major(self.application_version),
-                vk::version_minor(self.application_version),
-                vk::version_patch(self.application_version),
+                self.application_version.major,
+                self.application_version.minor,
+                self.application_version.patch,
                 engine_name,
-                vk::version_major(self.engine_version),
-                vk::version_minor(self.engine_version),
-                vk::version_patch(self.engine_version),
-                vk::version_major(api_version),
-                vk::version_minor(api_version),
-                vk::version_patch(api_version),
+                self.engine_version.major,
+                self.engine_version.minor,
+                self.engine_version.patch,
+                api_version.major,
+                api_version.minor,
+                api_version.patch,
             )
         }
 
@@ -367,10 +365,10 @@ Application info: {{
 
         #[cfg(feature = "portability")]
         let portability_enumeration_support =
-            system_info.is_extension_available(vk::KHR_PORTABILITY_ENUMERATION_NAME)?;
+            system_info.is_extension_available(&vk::KHR_PORTABILITY_ENUMERATION_EXTENSION.name)?;
         #[cfg(feature = "portability")]
         if portability_enumeration_support {
-            enabled_extensions.push(vk::KHR_PORTABILITY_ENUMERATION_NAME.as_ptr());
+            enabled_extensions.push(vk::KHR_PORTABILITY_ENUMERATION_EXTENSION.name);
         }
 
         if !self.headless_context {

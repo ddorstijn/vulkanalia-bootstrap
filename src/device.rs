@@ -1007,9 +1007,8 @@ impl PhysicalDeviceSelector {
         if u32::from(criteria.required_version) > device.properties.api_version {
             #[cfg(feature = "enable_tracing")]
             {
-                use crate::version::Version;
-                let requested_version = Version::new(criteria.required_version);
-                let available_version = Version::new(device.properties.api_version);
+                let requested_version = criteria.required_version;
+                let available_version = device.properties.api_version;
                 tracing::warn!(
                     "Device {} is not suitable. Requested version: {}, Available version: {}",
                     device_name,
@@ -1264,7 +1263,7 @@ impl PhysicalDeviceSelector {
                 )
             };
 
-            physical_device.supported_features_chain = requested_features_chain.clone();
+            physical_device.supported_features_chain = supported_features.clone();
         }
 
         Ok(physical_device)
@@ -1394,37 +1393,34 @@ impl DeviceBuilder {
 
         let queue_create_infos = queue_descriptions
             .iter()
-            .map(|(index, priorities)| vk::DeviceQueueCreateInfo {
-                queue_family_index: *index as u32,
-                queue_priorities: priorities.as_ptr(),
-                queue_count: priorities.len() as u32,
-                ..Default::default()
+            .map(|(index, priorities)| {
+                vk::DeviceQueueCreateInfo::builder()
+                    .queue_family_index(*index as u32)
+                    .queue_priorities(priorities)
             })
+            .collect::<Vec<_>>();
+
+        let mut extensions_to_enable = self
+            .physical_device
+            .extensions_to_enable
+            .iter()
+            .map(|ext| ext.as_ptr())
             .collect::<Vec<_>>();
 
         if self.physical_device.surface.is_some()
             || self.physical_device.defer_surface_initialization
         {
-            self.physical_device
-                .extensions_to_enable
-                .insert(vk::KHR_SWAPCHAIN_EXTENSION.name);
+            extensions_to_enable.push(vk::KHR_SWAPCHAIN_EXTENSION.name.as_ptr());
         }
 
-        let mut device_create_info = vk::DeviceCreateInfo::builder();
-        device_create_info.queue_create_infos(&queue_create_infos);
-        device_create_info.enabled_extension_names(
-            &self
-                .physical_device
-                .extensions_to_enable
-                .iter()
-                .map(|ext| ext.as_ptr())
-                .collect::<Vec<_>>(),
-        );
+        let mut device_create_info = vk::DeviceCreateInfo::builder()
+            .queue_create_infos(&queue_create_infos)
+            .enabled_extension_names(&extensions_to_enable);
 
         let requested_features_chain = &mut self.physical_device.requested_features_chain;
 
-        let mut features2 = vk::PhysicalDeviceFeatures2::builder();
-        features2.features(self.physical_device.features);
+        let mut features2 =
+            vk::PhysicalDeviceFeatures2::builder().features(self.physical_device.features);
 
         if self.instance.instance_version >= Version::V1_1_0
             || self.physical_device.properties2_ext_enabled
