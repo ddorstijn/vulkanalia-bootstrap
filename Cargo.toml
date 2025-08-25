@@ -2,7 +2,7 @@
 name = "vulkanalia-bootstrap"
 version = "0.1.3"
 edition = "2024"
-description = "A utility library that jump starts initialization of Vulkan via Ash"
+description = "A utility library that jump starts initialization of Vulkan via Vulkanalia"
 documentation = "https://docs.rs/vulkanalia_bootstrap/latest/vulkanalia_bootstrap"
 homepage = "https://github.com/ddorstijn/vulkanalia-bootstrap"
 repository = "https://github.com/ddorstijn/vulkanalia-bootstrap"
@@ -19,7 +19,7 @@ categories = [
     "graphics",
     "rendering::graphics-api",
 ]
-keywords = ["vulkan", "ash", "bindings", "gamedev", "rendering"]
+keywords = ["vulkan", "vulkanalia", "bindings", "gamedev", "rendering"]
 
 [dependencies]
 thiserror = "2.0.16"
