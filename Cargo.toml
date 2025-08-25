@@ -49,3 +49,6 @@ default = []
 [[example]]
 name = "simple"
 required-features = ["enable_tracing"]
+
+[[example]]
+name = "vk_guide"

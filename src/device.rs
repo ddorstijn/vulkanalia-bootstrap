@@ -1004,6 +1004,13 @@ impl PhysicalDeviceSelector {
             return;
         };
 
+        println!(
+            "req: {}, req u32: {}, api: {}, api u32: {}",
+            criteria.required_version,
+            u32::from(criteria.required_version),
+            Version::from(device.properties.api_version),
+            device.properties.api_version,
+        );
         if u32::from(criteria.required_version) > device.properties.api_version {
             #[cfg(feature = "enable_tracing")]
             {
@@ -1271,6 +1278,7 @@ impl PhysicalDeviceSelector {
 
     fn select_devices(&self) -> crate::Result<BTreeSet<PhysicalDevice>> {
         let criteria = &self.selection_criteria;
+        dbg!(criteria);
         let instance = self.instance.as_ref();
         if criteria.require_present
             && !criteria.defer_surface_initialization
