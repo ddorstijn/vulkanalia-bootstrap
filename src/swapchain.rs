@@ -4,6 +4,7 @@ use crate::device::QueueType;
 use crate::error::FormatError;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
+use vulkanalia::Version;
 use vulkanalia::vk;
 use vulkanalia::vk::DeviceV1_0;
 use vulkanalia::vk::HasBuilder;
@@ -474,7 +475,7 @@ pub struct Swapchain {
     pub image_format: vk::Format,
     pub extent: vk::Extent2D,
     image_usage_flags: vk::ImageUsageFlags,
-    instance_version: u32,
+    instance_version: Version,
     allocation_callbacks: Option<AllocationCallbacks>,
     image_views: Mutex<Vec<vk::ImageView>>,
 }
@@ -511,7 +512,7 @@ impl Swapchain {
             .map(|image| {
                 let mut create_info = vk::ImageViewCreateInfo::builder();
 
-                if self.instance_version >= vk::make_version(1, 1, 0) {
+                if self.instance_version >= Version::V1_1_0 {
                     create_info = create_info.push_next(&mut desired_flags);
                 }
 

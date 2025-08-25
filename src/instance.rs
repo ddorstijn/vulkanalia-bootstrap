@@ -9,7 +9,7 @@ use vulkanalia::vk::{
     self, EntryV1_1, ExtDebugUtilsExtension, HasBuilder, InstanceV1_0, KhrSurfaceExtension,
 };
 use vulkanalia::vk::{AllocationCallbacks, DebugUtilsMessengerEXT};
-use vulkanalia::window as vk_window;
+use vulkanalia::{Version, window as vk_window};
 
 pub trait WindowTraits: HasDisplayHandle + HasWindowHandle + Debug {}
 impl<T> WindowTraits for T where T: HasDisplayHandle + HasWindowHandle + Debug {}
@@ -73,8 +73,8 @@ pub struct InstanceBuilder {
     engine_name: String,
     application_version: u32,
     engine_version: u32,
-    minimum_instance_version: u32,
-    required_instance_version: u32,
+    minimum_instance_version: Version,
+    required_instance_version: Version,
 
     // VkInstanceCreateInfo
     layers: Vec<vk::ExtensionName>,
@@ -110,8 +110,8 @@ impl InstanceBuilder {
             engine_name: "".to_string(),
             application_version: 0,
             engine_version: 0,
-            minimum_instance_version: 0,
-            required_instance_version: vk::make_version(1, 0, 0),
+            minimum_instance_version: Version::V1_0_0,
+            required_instance_version: Version::V1_0_0,
             layers: vec![],
             extensions: vec![],
             flags: Default::default(),
@@ -154,12 +154,12 @@ impl InstanceBuilder {
         self
     }
 
-    pub fn require_api_version(mut self, version: u32) -> Self {
+    pub fn require_api_version(mut self, version: Version) -> Self {
         self.required_instance_version = version;
         self
     }
 
-    pub fn minimum_instance_version(mut self, version: u32) -> Self {
+    pub fn minimum_instance_version(mut self, version: Version) -> Self {
         self.minimum_instance_version = version;
         self
     }
@@ -250,20 +250,21 @@ impl InstanceBuilder {
         let system_info = SystemInfo::get_system_info()?;
 
         let instance_version = {
-            if self.minimum_instance_version > vk::make_version(1, 0, 0)
-                || self.required_instance_version > vk::make_version(1, 0, 0)
+            if self.minimum_instance_version > Version::V1_0_0
+                || self.required_instance_version > Version::V1_0_0
             {
-                let version = unsafe { system_info.entry.enumerate_instance_version() };
-                let version = version.unwrap_or(vk::make_version(1, 0, 0));
+                let version = unsafe { system_info.entry.enumerate_instance_version() }
+                    .map_or(Version::V1_0_0, Version::from);
 
                 if version < self.minimum_instance_version
-                    || (self.minimum_instance_version == 0
+                    || (self.minimum_instance_version == Version::V1_0_0
                         && version < self.required_instance_version)
                 {
-                    return match vk::version_minor(
-                        self.required_instance_version
-                            .max(self.minimum_instance_version),
-                    ) {
+                    return match self
+                        .required_instance_version
+                        .max(self.minimum_instance_version)
+                        .minor
+                    {
                         3 => Err(crate::InstanceError::VulkanVersion13Unavailable.into()),
                         2 => Err(crate::InstanceError::VulkanVersion12Unavailable.into()),
                         1 => Err(crate::InstanceError::VulkanVersion11Unavailable.into()),
@@ -276,7 +277,7 @@ impl InstanceBuilder {
                     version
                 }
             } else {
-                vk::make_version(1, 0, 0)
+                Version::V1_0_0
             }
         };
 
@@ -290,7 +291,7 @@ impl InstanceBuilder {
             );
         }
 
-        let api_version = if instance_version < vk::make_version(1, 1, 0)
+        let api_version = if instance_version < Version::V1_1_0
             || self.required_instance_version < self.minimum_instance_version
         {
             instance_version
@@ -313,7 +314,7 @@ impl InstanceBuilder {
             application_version: self.application_version,
             engine_name: engine_name.as_bytes().as_ptr() as _,
             engine_version: self.engine_version,
-            api_version: api_version,
+            api_version: api_version.into(),
             ..Default::default()
         };
 
@@ -356,7 +357,7 @@ Application info: {{
             enabled_extensions.push(DEBUG_UTILS_EXT_NAME);
         }
 
-        let properties2_ext_enabled = api_version < vk::make_version(1, 1, 0)
+        let properties2_ext_enabled = api_version < Version::V1_1_0
             && system_info
                 .is_extension_available(&vk::KHR_GET_PHYSICAL_DEVICE_PROPERTIES2_EXTENSION.name)?;
 
@@ -507,8 +508,8 @@ pub struct Instance {
     pub(crate) instance: vulkanalia::Instance,
     pub(crate) allocation_callbacks: Option<AllocationCallbacks>,
     pub(crate) surface: Option<vk::SurfaceKHR>,
-    pub(crate) instance_version: u32,
-    pub api_version: u32,
+    pub(crate) instance_version: Version,
+    pub api_version: Version,
     pub(crate) properties2_ext_enabled: bool,
     pub(crate) debug_messenger: Option<DebugUtilsMessengerEXT>,
     _system_info: SystemInfo,

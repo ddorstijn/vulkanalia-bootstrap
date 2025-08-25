@@ -7,6 +7,7 @@ use std::fmt::Debug;
 use std::hint::unreachable_unchecked;
 use std::ops::Deref;
 use std::sync::Arc;
+use vulkanalia::Version;
 use vulkanalia::vk::{
     self, DeviceV1_0, HasBuilder, InstanceV1_0, InstanceV1_1, KhrSurfaceExtension,
 };
@@ -858,7 +859,7 @@ struct SelectionCriteria {
     require_separate_compute_queue: bool,
     required_mem_size: vk::DeviceSize,
     required_extensions: BTreeSet<vk::ExtensionName>,
-    required_version: u32,
+    required_version: Version,
     required_features: vk::PhysicalDeviceFeatures,
     required_formats: Vec<vk::Format>,
     requested_features_chain: RefCell<GenericFeatureChain>,
@@ -880,7 +881,7 @@ impl Default for SelectionCriteria {
             require_separate_compute_queue: false,
             required_mem_size: 0,
             required_extensions: BTreeSet::new(),
-            required_version: vk::make_version(1, 0, 0),
+            required_version: Version::V1_0_0,
             required_features: vk::PhysicalDeviceFeatures::default(),
             defer_surface_initialization: false,
             use_first_gpu_unconditionally: false,
@@ -1003,7 +1004,7 @@ impl PhysicalDeviceSelector {
             return;
         };
 
-        if criteria.required_version > device.properties.api_version {
+        if u32::from(criteria.required_version) > device.properties.api_version {
             #[cfg(feature = "enable_tracing")]
             {
                 use crate::version::Version;
@@ -1235,7 +1236,7 @@ impl PhysicalDeviceSelector {
         physical_device.properties2_ext_enabled = instance.properties2_ext_enabled;
 
         let requested_features_chain = criteria.requested_features_chain.borrow();
-        let instance_is_11 = instance.instance_version >= vk::make_version(1, 1, 0);
+        let instance_is_11 = instance.instance_version >= Version::V1_1_0;
         if !requested_features_chain.is_empty()
             && (instance_is_11 || instance.properties2_ext_enabled)
         {
@@ -1425,7 +1426,7 @@ impl DeviceBuilder {
         let mut features2 = vk::PhysicalDeviceFeatures2::builder();
         features2.features(self.physical_device.features);
 
-        if self.instance.instance_version >= vk::make_version(1, 1, 0)
+        if self.instance.instance_version >= Version::V1_1_0
             || self.physical_device.properties2_ext_enabled
         {
             device_create_info = device_create_info.push_next(&mut features2);
