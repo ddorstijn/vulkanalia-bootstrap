@@ -374,7 +374,7 @@ Application info: {{
         if !self.headless_context {
             if let Some(window) = self.window.clone() {
                 let surface_extensions: Vec<vk::ExtensionName> =
-                    vk_window::get_required_instance_extensions(&window)
+                    vk_window::get_required_instance_extensions(window.as_ref())
                         .into_iter()
                         .map(|ext| **ext)
                         .collect();
@@ -484,7 +484,9 @@ Application info: {{
 
         let mut surface = None;
         if let Some(window) = self.window.clone() {
-            surface = Some(unsafe { vk_window::create_surface(&instance, &window, &window)? });
+            surface = Some(unsafe {
+                vk_window::create_surface(&instance, window.as_ref(), window.as_ref())?
+            });
             #[cfg(feature = "enable_tracing")]
             tracing::info!("Created vkSurfaceKhr")
         };
