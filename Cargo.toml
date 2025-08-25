@@ -8,7 +8,10 @@ homepage = "https://github.com/ddorstijn/vulkanalia-bootstrap"
 repository = "https://github.com/ddorstijn/vulkanalia-bootstrap"
 license = "MIT OR Apache-2.0"
 readme = "README.md"
-authors = ["Kirill Mironov <vetrokm@gmail.com>"]
+authors = [
+    "Kirill Mironov <vetrokm@gmail.com>",
+    "Danny Dorstijn <dannydorstijn1997@gmail.com>",
+]
 categories = [
     "api-bindings",
     "external-ffi-bindings",

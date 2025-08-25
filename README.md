@@ -1,14 +1,14 @@
 # `Vulkanalia Bootstrap`&emsp; [![Latest Version]][crates.io] [![Rustc Version 1.36+]][rustc] ![license]
 
-[Latest Version]: https://img.shields.io/crates/v/Vulkanalia_bootstrap.svg
-[crates.io]: https://crates.io/crates/Vulkanalia_bootstrap
+[Latest Version]: https://img.shields.io/crates/v/ash_bootstrap.svg
+[crates.io]: https://crates.io/crates/vulkanalia_bootstrap
 [Rustc Version 1.36+]: https://img.shields.io/badge/rustc-1.85+-lightgray.svg
 [rustc]: https://blog.rust-lang.org/2025/02/20/Rust-1.85.0/
 [license]: https://img.shields.io/badge/license-Apache--2.0_OR_MIT-blue
 
 **Vulkanalia Bootstrap** is a utility library that jump starts initialization of Vulkan via the Vulkanalia bindings.
 
-**Note:** This is a quick and dirty fork of ash bootrstrap. Feel free to use it as a quick starter. I will try to keep it somewhat up-to-date with ash-bootrstrap. Feel free to send improvements through a pull-request.
+**Note:** This is a quick and dirty fork of ash bootrstrap. I really appreciate the way Vulkanalia implements its API and I felt the only thing holding me back was the missing bootstrap library. So I went ahead and decided to create it myself. Feel free to use it as a quick starter. I will try to keep it somewhat up-to-date with ash-bootrstrap. Feel free to send improvements through a pull-request.
 
 ```toml
 [dependencies]
@@ -23,7 +23,7 @@ vulkanalia_bootstrap = "0.1.3"
 
 - Tracing support: Optional integration with tracing crate
 
-- Portability: macOS compatibility via portability feature
+- Portability: macOS compatibility via portability feature **Not tested**
 
 ## Usage examples
 
