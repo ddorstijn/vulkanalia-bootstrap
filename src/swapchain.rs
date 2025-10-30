@@ -510,22 +510,24 @@ impl Swapchain {
         let views: Vec<_> = images
             .into_iter()
             .map(|image| {
+                // Build the ImageViewCreateInfo using chaining so values are actually set.
                 let mut create_info = vk::ImageViewCreateInfo::builder();
 
                 if self.instance_version >= Version::V1_1_0 {
                     create_info = create_info.push_next(&mut desired_flags);
                 }
 
-                create_info.image(image);
-                create_info.view_type(vk::ImageViewType::_2D);
-                create_info.format(self.image_format);
-                create_info.components(vk::ComponentMapping::default());
-                create_info.subresource_range(
-                    vk::ImageSubresourceRange::builder()
-                        .aspect_mask(vk::ImageAspectFlags::COLOR)
-                        .level_count(1)
-                        .layer_count(1),
-                );
+                let create_info = create_info
+                    .image(image)
+                    .view_type(vk::ImageViewType::_2D)
+                    .format(self.image_format)
+                    .components(vk::ComponentMapping::default())
+                    .subresource_range(
+                        vk::ImageSubresourceRange::builder()
+                            .aspect_mask(vk::ImageAspectFlags::COLOR)
+                            .level_count(1)
+                            .layer_count(1),
+                    );
 
                 unsafe {
                     self.device

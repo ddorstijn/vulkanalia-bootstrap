@@ -1,4 +1,7 @@
 use std::sync::Arc;
+use tracing_subscriber::layer::SubscriberExt;
+use tracing_subscriber::util::SubscriberInitExt;
+use tracing_subscriber::{EnvFilter, fmt};
 use vulkanalia::vk::HasBuilder;
 use vulkanalia::{Version, vk};
 use vulkanalia_bootstrap::{
@@ -20,9 +23,10 @@ impl ApplicationHandler for App {
         let init_window = || -> anyhow::Result<Arc<Window>> {
             let window = Arc::new(event_loop.create_window(WindowAttributes::default())?);
 
+            // Create an instance with some sensible defaults (request validation layers in debug)
             let instance = InstanceBuilder::new(Some(window.clone()))
-                .app_name("Example Vulkan Application")
-                .engine_name("Example Vulkan Engine")
+                .app_name("vk-guide example")
+                .engine_name("vulkanalia-bootstrap")
                 .request_validation_layers(true)
                 .minimum_instance_version(Version::new(1, 3, 0))
                 .require_api_version(Version::new(1, 3, 0))
@@ -44,14 +48,34 @@ impl ApplicationHandler for App {
 
             let device = Arc::new(DeviceBuilder::new(physical_device, instance.clone()).build()?);
 
+            // Acquire the graphics queue to validate queue selection
             let (_graphics_queue_index, _graphics_queue) = device.get_queue(QueueType::Graphics)?;
-            let swapchain_builder = SwapchainBuilder::new(instance.clone(), device.clone());
+
+            // Build a swapchain for the window+device
+            let swapchain_builder = SwapchainBuilder::new(instance.clone(), device.clone())
+                .use_default_format_selection()
+                .use_default_present_modes();
 
             let swapchain = swapchain_builder.build()?;
 
-            // And right now we got rid of 400-500 lines of vulkan boilerplate just like that.
-            // Now let's cleanup.
+            // Query images and create image views using the library helper.
+            let images = swapchain.get_images()?;
+            println!(
+                "Swapchain has {} images, extent: {}x{}",
+                images.len(),
+                swapchain.extent.width,
+                swapchain.extent.height
+            );
 
+            // Use the library-provided helper to create image views. The implementation was fixed
+            // to construct ImageViewCreateInfo correctly, so this should be safe across platforms.
+            let image_views = swapchain.get_image_views()?;
+            println!("Created {} image views", image_views.len());
+
+            // Destroy image views via the swapchain helper before destroying the swapchain/device
+            swapchain.destroy_image_views().ok();
+
+            // Cleanup and destroy swapchain/device/instance
             swapchain.destroy();
             device.destroy();
             instance.destroy();
@@ -83,6 +107,12 @@ impl ApplicationHandler for App {
 }
 
 fn main() -> anyhow::Result<()> {
+    // Initialize a simple tracing subscriber so example logs are visible
+    tracing_subscriber::registry()
+        .with(fmt::layer())
+        .with(EnvFilter::from_default_env())
+        .init();
+
     let event_loop = EventLoop::new()?;
     let mut app = App::default();
     event_loop.run_app(&mut app)?;
