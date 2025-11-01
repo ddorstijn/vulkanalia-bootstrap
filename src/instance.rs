@@ -6,7 +6,8 @@ use std::ffi::c_void;
 use std::fmt::Debug;
 use std::sync::Arc;
 use vulkanalia::vk::{
-    self, EntryV1_1, ExtDebugUtilsExtension, HasBuilder, InstanceV1_0, KhrSurfaceExtension,
+    self, EntryV1_1, ExtDebugUtilsExtensionInstanceCommands, HasBuilder, InstanceV1_0,
+    KhrSurfaceExtensionInstanceCommands,
 };
 use vulkanalia::vk::{AllocationCallbacks, DebugUtilsMessengerEXT};
 use vulkanalia::{Version, window as vk_window};

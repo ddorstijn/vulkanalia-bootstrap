@@ -9,7 +9,7 @@ use std::ops::Deref;
 use std::sync::Arc;
 use vulkanalia::Version;
 use vulkanalia::vk::{
-    self, DeviceV1_0, HasBuilder, InstanceV1_0, InstanceV1_1, KhrSurfaceExtension,
+    self, DeviceV1_0, HasBuilder, InstanceV1_0, InstanceV1_1, KhrSurfaceExtensionInstanceCommands,
 };
 use vulkanalia::vk::{AllocationCallbacks, DeviceV1_1};
 

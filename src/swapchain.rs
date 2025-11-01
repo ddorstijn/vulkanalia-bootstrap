@@ -8,8 +8,8 @@ use vulkanalia::Version;
 use vulkanalia::vk;
 use vulkanalia::vk::DeviceV1_0;
 use vulkanalia::vk::HasBuilder;
-use vulkanalia::vk::KhrSurfaceExtension;
-use vulkanalia::vk::KhrSwapchainExtension;
+use vulkanalia::vk::KhrSurfaceExtensionInstanceCommands;
+use vulkanalia::vk::KhrSwapchainExtensionDeviceCommands;
 use vulkanalia::vk::{AllocationCallbacks, Handle, SwapchainKHR};
 
 #[derive(Debug, Clone, Ord, PartialOrd, Eq, PartialEq)]
