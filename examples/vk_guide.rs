@@ -153,11 +153,12 @@ impl Drop for Vulkan {
         for frame in self.frames.iter_mut() {
             unsafe {
                 self.device
-                    .free_command_buffers(frame.command_pool, &[frame.command_buffer])
-            };
-
-            unsafe {
+                    .free_command_buffers(frame.command_pool, &[frame.command_buffer]);
                 self.device.destroy_command_pool(frame.command_pool, None);
+                self.device.destroy_fence(frame.render_fence, None);
+                self.device.destroy_semaphore(frame.render_semaphore, None);
+                self.device
+                    .destroy_semaphore(frame.swapchain_semaphore, None);
             }
         }
 
