@@ -504,6 +504,7 @@ Application info: {{
     }
 }
 
+#[derive(Debug)]
 pub struct Instance {
     pub(crate) instance: vulkanalia::Instance,
     pub(crate) allocation_callbacks: Option<AllocationCallbacks>,

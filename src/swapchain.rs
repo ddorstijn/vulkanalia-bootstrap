@@ -469,6 +469,7 @@ impl SwapchainBuilder {
     }
 }
 
+#[derive(Debug)]
 pub struct Swapchain {
     device: Arc<Device>,
     swapchain: vk::SwapchainKHR,

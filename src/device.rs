@@ -1278,7 +1278,6 @@ impl PhysicalDeviceSelector {
 
     fn select_devices(&self) -> crate::Result<BTreeSet<PhysicalDevice>> {
         let criteria = &self.selection_criteria;
-        dbg!(criteria);
         let instance = self.instance.as_ref();
         if criteria.require_present
             && !criteria.defer_surface_initialization
@@ -1474,6 +1473,7 @@ impl DeviceBuilder {
     }
 }
 
+#[derive(Debug)]
 pub struct Device {
     instance: Arc<Instance>,
     device: vulkanalia::Device,
