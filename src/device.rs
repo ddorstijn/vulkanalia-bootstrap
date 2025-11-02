@@ -1004,13 +1004,6 @@ impl PhysicalDeviceSelector {
             return;
         };
 
-        println!(
-            "req: {}, req u32: {}, api: {}, api u32: {}",
-            criteria.required_version,
-            u32::from(criteria.required_version),
-            Version::from(device.properties.api_version),
-            device.properties.api_version,
-        );
         if u32::from(criteria.required_version) > device.properties.api_version {
             #[cfg(feature = "enable_tracing")]
             {
