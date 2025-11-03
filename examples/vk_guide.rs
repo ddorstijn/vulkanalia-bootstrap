@@ -1,3 +1,5 @@
+//! Chapter 1 of vk_guide
+
 use std::sync::Arc;
 use std::time::Duration;
 use tracing_subscriber::layer::SubscriberExt;

@@ -25,7 +25,7 @@ keywords = ["vulkan", "vulkanalia", "bindings", "gamedev", "rendering"]
 thiserror = "2.0.17"
 raw-window-handle = { version = "0.6.2" }
 tracing = { version = "0.1.41", optional = true }
-vulkanalia = { version = "0.31.0", features = ["libloading", "window"] }
+vulkanalia = { version = "0.32.0", features = ["libloading", "window"] }
 libloading = "0.8.8"
 
 [dev-dependencies]

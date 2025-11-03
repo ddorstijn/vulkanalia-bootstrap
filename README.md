@@ -12,7 +12,7 @@
 
 ```toml
 [dependencies]
-vulkanalia_bootstrap = "0.1.3"
+vulkanalia_bootstrap = "0.1.5"
 ```
 
 ## Features
