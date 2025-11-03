@@ -1,6 +1,6 @@
 [package]
 name = "vulkanalia-bootstrap"
-version = "0.1.4"
+version = "0.1.5"
 edition = "2024"
 description = "A utility library that jump starts initialization of Vulkan via Vulkanalia"
 documentation = "https://docs.rs/vulkanalia_bootstrap/latest/vulkanalia_bootstrap"
