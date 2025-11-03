@@ -178,7 +178,10 @@ impl VulkanEngine {
                 return Ok(());
             }
 
-            if !matches!(err, vk::SuccessCode::SUCCESS | vk::SuccessCode::SUBOPTIMAL_KHR) {
+            if !matches!(
+                err,
+                vk::SuccessCode::SUCCESS | vk::SuccessCode::SUBOPTIMAL_KHR
+            ) {
                 return Err(anyhow::anyhow!(
                     "Failed acquiring next swapchain image, {}",
                     err

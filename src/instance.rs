@@ -135,56 +135,67 @@ impl InstanceBuilder {
         }
     }
 
+    /// Set the application name that will be passed to Vulkan via VkApplicationInfo.
     pub fn app_name(mut self, app_name: impl Into<String>) -> Self {
         self.app_name = app_name.into();
         self
     }
 
+    /// Set the engine name that will be passed to Vulkan via VkApplicationInfo.
     pub fn engine_name(mut self, engine_name: impl Into<String>) -> Self {
         self.engine_name = engine_name.into();
         self
     }
 
+    /// Set the application version reported to Vulkan.
     pub fn app_version(mut self, version: Version) -> Self {
         self.application_version = version;
         self
     }
 
+    /// Set the engine version reported to Vulkan.
     pub fn engine_version(mut self, version: Version) -> Self {
         self.engine_version = version;
         self
     }
 
+    /// Require a minimum Vulkan API version for instance creation.
     pub fn require_api_version(mut self, version: Version) -> Self {
         self.required_instance_version = version;
         self
     }
 
+    /// Set the minimum instance API version that must be supported by the system.
     pub fn minimum_instance_version(mut self, version: Version) -> Self {
         self.minimum_instance_version = version;
         self
     }
 
+    /// Enable the given instance layer for creation (e.g. validation layers).
     pub fn enable_layer(mut self, layer: vk::ExtensionName) -> Self {
         self.layers.push(layer.into());
         self
     }
 
+    /// Enable the given Vulkan instance extension for creation.
     pub fn enable_extension(mut self, extension: vk::ExtensionName) -> Self {
         self.extensions.push(extension);
         self
     }
 
+    /// Explicitly enable or disable validation layers.
     pub fn enable_validation_layers(mut self, enable: bool) -> Self {
         self.enable_validation_layers = enable;
         self
     }
 
+    /// Request validation layers when available on the system (will be used if present).
     pub fn request_validation_layers(mut self, request: bool) -> Self {
         self.request_validation_layers = request;
         self
     }
 
+    /// Use the default debug messenger which prints messages to stdout.
     pub fn use_default_debug_messenger(mut self) -> Self {
         self.use_debug_messenger = true;
         self.debug_callback = Some(vulkan_debug_callback);
@@ -198,6 +209,7 @@ impl InstanceBuilder {
         self
     }
 
+    /// Set a custom debug messenger callback function.
     pub fn set_debug_messenger(
         mut self,
         callback: vk::PFN_vkDebugUtilsMessengerCallbackEXT,
@@ -207,16 +219,19 @@ impl InstanceBuilder {
         self
     }
 
+    /// Provide a user data pointer that will be passed to the debug callback.
     pub fn debug_user_data(mut self, debug_user_data: DebugUserData) -> Self {
         self.debug_user_data = debug_user_data;
         self
     }
 
+    /// Indicate that no windowing surface will be created (headless mode).
     pub fn headless(mut self, headless: bool) -> Self {
         self.headless_context = headless;
         self
     }
 
+    /// Set the severity flags for the debug messenger (e.g. WARNING | ERROR).
     pub fn debug_messenger_severity(
         mut self,
         severity: vk::DebugUtilsMessageSeverityFlagsEXT,
@@ -225,6 +240,7 @@ impl InstanceBuilder {
         self
     }
 
+    /// Add additional severity flags to the debug messenger.
     pub fn add_debug_messenger_severity(
         mut self,
         severity: vk::DebugUtilsMessageSeverityFlagsEXT,
@@ -233,11 +249,13 @@ impl InstanceBuilder {
         self
     }
 
+    /// Set the types of debug messages the messenger should receive (general/validation/perf).
     pub fn debug_messenger_type(mut self, message_type: vk::DebugUtilsMessageTypeFlagsEXT) -> Self {
         self.debug_message_type = message_type;
         self
     }
 
+    /// Add additional debug message types to the messenger configuration.
     pub fn add_debug_messenger_type(
         mut self,
         message_type: vk::DebugUtilsMessageTypeFlagsEXT,
@@ -247,6 +265,10 @@ impl InstanceBuilder {
     }
 
     #[cfg_attr(feature = "enable_tracing", tracing::instrument(skip(self)))]
+    /// Build and return an `Instance` according to the configured options.
+    ///
+    /// Performs validation of available layers/extensions and creates the Vulkan instance
+    /// and optional debug messenger and surface.
     pub fn build(self) -> crate::Result<Arc<Instance>> {
         let system_info = SystemInfo::get_system_info()?;
 

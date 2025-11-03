@@ -90,6 +90,7 @@ impl SystemInfo {
         })
     }
 
+    /// Return true if the given instance extension name is available on the system.
     pub fn is_extension_available(&self, extension: &vk::ExtensionName) -> crate::Result<bool> {
         for ext in &self.available_extensions {
             if ext.extension_name == *extension {
@@ -100,6 +101,7 @@ impl SystemInfo {
         Ok(false)
     }
 
+    /// Return true if every extension in `extensions` is available on the system.
     pub fn are_extensions_available(
         &self,
         extensions: &Vec<vk::ExtensionName>,
@@ -115,6 +117,7 @@ impl SystemInfo {
         Ok(all_found)
     }
 
+    /// Return true if the given instance layer name is available on the system.
     pub fn is_layer_available(&self, layer: vk::ExtensionName) -> crate::Result<bool> {
         for ext in &self.available_layers {
             if ext.layer_name.to_string_lossy() == layer.to_string_lossy() {
@@ -125,6 +128,7 @@ impl SystemInfo {
         Ok(false)
     }
 
+    /// Return true if every layer in `layers` is available on the system.
     pub fn are_layers_available<'a, I: IntoIterator<Item = vk::ExtensionName>>(
         &self,
         layers: I,

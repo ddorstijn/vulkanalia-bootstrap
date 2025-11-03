@@ -273,6 +273,10 @@ impl PhysicalDevice {
 
         vk::SampleCountFlags::_1
     }
+
+    /// If the given device extension is available on this physical device, mark it to be
+    /// enabled when creating a logical device and return true. Returns false if the
+    /// extension is not present.
     pub fn enable_extension_if_present(&mut self, extension: vk::ExtensionName) -> bool {
         let extension = extension.into();
 
@@ -283,6 +287,9 @@ impl PhysicalDevice {
         }
     }
 
+    /// If all extensions in `extensions` are available on this physical device, mark them to
+    /// be enabled when creating the logical device and return true. If any are missing,
+    /// nothing is enabled and false is returned.
     pub fn enable_extensions_if_present<I: IntoIterator<Item = vk::ExtensionName>>(
         &mut self,
         extensions: I,
@@ -303,8 +310,6 @@ impl PhysicalDevice {
     }
 }
 
-// TODO: proper transmute via ash
-//region vulkanfeatures
 #[derive(Debug, Clone)]
 pub enum VulkanPhysicalDeviceFeature2 {
     PhysicalDeviceVulkan11(vk::PhysicalDeviceVulkan11Features),
@@ -899,6 +904,9 @@ pub struct PhysicalDeviceSelector {
 }
 
 impl PhysicalDeviceSelector {
+    /// Create a new `PhysicalDeviceSelector` for the provided `Instance`.
+    ///
+    /// The selector can be configured with builder-style methods before calling `select`.
     pub fn new(instance: Arc<Instance>) -> PhysicalDeviceSelector {
         let enable_portability_subset = cfg!(feature = "portability");
         let require_present = instance.surface.is_some();
@@ -915,11 +923,14 @@ impl PhysicalDeviceSelector {
         }
     }
 
+    /// Specify a surface to use when evaluating device presentation support.
     pub fn surface(mut self, surface: vk::SurfaceKHR) -> Self {
         self.surface.replace(surface);
         self
     }
 
+    /// Add an additional device feature (vulkan feature2 struct) that must be supported by
+    /// the physical device in order to be selected.
     pub fn add_required_extension_feature<T: Into<VulkanPhysicalDeviceFeature2>>(
         self,
         feature: T,
@@ -931,56 +942,68 @@ impl PhysicalDeviceSelector {
         self
     }
 
+    /// Require the given `vk::PhysicalDeviceFeatures` when selecting a physical device.
     pub fn add_required_features(mut self, features: vk::PhysicalDeviceFeatures) -> Self {
         self.selection_criteria.required_features = features;
         self
     }
 
+    /// Restrict selection to devices whose name matches `name`.
     pub fn name(mut self, name: impl Into<String>) -> Self {
         self.selection_criteria.name = name.into();
         self
     }
 
+    /// Prefer devices of the given `PreferredDeviceType` when ranking candidates.
     pub fn preferred_device_type(mut self, device_type: PreferredDeviceType) -> Self {
         self.selection_criteria.preferred_device_type = device_type;
         self
     }
 
+    /// Allow devices of any GPU type (when true) or restrict to the preferred device type.
     pub fn allow_any_gpu_device_type(mut self, allow: bool) -> Self {
         self.selection_criteria.allow_any_type = allow;
         self
     }
 
+    /// Require a dedicated transfer-only queue family to be present on the physical device.
     pub fn require_dedicated_transfer_queue(mut self, require: bool) -> Self {
         self.selection_criteria.require_dedicated_transfer_queue = require;
         self
     }
 
+    /// Require a dedicated compute-only queue family to be present on the physical device.
     pub fn require_dedicated_compute_queue(mut self, require: bool) -> Self {
         self.selection_criteria.require_dedicated_compute_queue = require;
         self
     }
 
+    /// Require a queue family separate from graphics for transfer operations.
     pub fn require_separate_transfer_queue(mut self, require: bool) -> Self {
         self.selection_criteria.require_separate_transfer_queue = require;
         self
     }
 
+    /// Require a queue family separate from graphics for compute operations.
     pub fn require_separate_compute_queue(mut self, require: bool) -> Self {
         self.selection_criteria.require_separate_compute_queue = require;
         self
     }
 
+    /// Require the device to have at least `required` bytes of device-local memory.
     pub fn required_device_memory_size(mut self, required: vk::DeviceSize) -> Self {
         self.selection_criteria.required_mem_size = required;
         self
     }
 
+    /// Require support for the provided list of `vk::Format`s on the device's surface.
     pub fn required_formats(mut self, required: impl IntoIterator<Item = vk::Format>) -> Self {
         self.selection_criteria.required_formats = required.into_iter().collect();
         self
     }
 
+    /// If `select` is true, automatically select the first enumerated physical device
+    /// without applying suitability checks.
     pub fn select_first_device_unconditionally(mut self, select: bool) -> Self {
         self.selection_criteria.use_first_gpu_unconditionally = select;
         self
@@ -1337,6 +1360,9 @@ impl PhysicalDeviceSelector {
         Ok(physical_devices)
     }
 
+    /// Select a suitable `PhysicalDevice` according to the configured criteria.
+    ///
+    /// Returns a `PhysicalDevice` on success or an error if no suitable device could be found.
     pub fn select(self) -> crate::Result<PhysicalDevice> {
         let devices = self.select_devices()?;
         #[cfg(feature = "enable_tracing")]
@@ -1380,6 +1406,27 @@ impl DeviceBuilder {
         self
     }
 
+    /// Create a logical `Device` from the configured `PhysicalDevice`.
+    ///
+    /// What this does:
+    /// - Builds queue create infos for each discovered queue family (default priority 1.0).
+    /// - Enables any device extensions that were marked on the `PhysicalDevice` (and the
+    ///   `VK_KHR_swapchain` extension when a surface is present or surface init is deferred).
+    /// - Pushes a `vk::PhysicalDeviceFeatures2` and any requested feature-chain nodes onto the
+    ///   device create pNext chain when the instance supports properties2 or is Vulkan 1.1+.
+    /// - Calls `vkCreateDevice` and returns a `Device` wrapper on success.
+    ///
+    /// Returns:
+    /// - `Ok(Device)` containing the created `vulkanalia::Device`, retained `Instance` and
+    ///   selected `PhysicalDevice` information.
+    /// - An error if device creation fails.
+    ///
+    /// Notes:
+    /// - Queue configuration is simplified: every queue family discovered by the physical
+    ///   device is created with a single queue at priority 1.0. Customize if you need
+    ///   different priorities or explicit queue counts.
+    /// - Any allocation callbacks previously set via `DeviceBuilder::allocation_callbacks`
+    ///   are forwarded to `vkCreateDevice` and stored in the returned `Device`.
     pub fn build(mut self) -> crate::Result<Device> {
         // TODO: custom queue setup
         // (index, priorities)

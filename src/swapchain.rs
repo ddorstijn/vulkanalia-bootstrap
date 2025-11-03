@@ -219,6 +219,8 @@ impl SwapchainBuilder {
         }
     }
 
+    /// Add a preferred surface format to try when creating the swapchain.
+    /// Preferred formats are evaluated in the order they are added (main before fallback).
     pub fn desired_format(mut self, format: vk::SurfaceFormat2KHR) -> Self {
         self.desired_formats.push(Format {
             inner: format,
@@ -227,12 +229,15 @@ impl SwapchainBuilder {
         self
     }
 
+    /// Set the desired width/height for the swapchain extent when the surface allows
+    /// an arbitrary size (i.e. current_extent.width == u32::MAX).
     pub fn desired_size(mut self, size: vk::Extent2D) -> Self {
         self.desired_width = size.width;
         self.desired_height = size.height;
         self
     }
 
+    /// Add a fallback surface format to consider if preferred formats are not available.
     pub fn fallback_format(mut self, format: vk::SurfaceFormat2KHR) -> Self {
         self.desired_formats.push(Format {
             inner: format,
@@ -252,6 +257,7 @@ impl SwapchainBuilder {
         self
     }
 
+    /// Add a preferred present mode (e.g. MAILBOX, FIFO) to try when creating the swapchain.
     pub fn desired_present_mode(mut self, present_mode: vk::PresentModeKHR) -> Self {
         self.desired_present_modes.push(PresentMode {
             inner: present_mode,
@@ -260,6 +266,7 @@ impl SwapchainBuilder {
         self
     }
 
+    /// Add a fallback present mode that will be used if preferred present modes are not present.
     pub fn fallback_present_mode(mut self, present_mode: vk::PresentModeKHR) -> Self {
         self.desired_present_modes.push(PresentMode {
             inner: present_mode,
@@ -482,12 +489,14 @@ pub struct Swapchain {
 }
 
 impl Swapchain {
+    /// Retrieve the images currently owned by the swapchain.
     pub fn get_images(&self) -> crate::Result<Vec<vk::Image>> {
         let images = unsafe { self.device.get_swapchain_images_khr(self.swapchain) }?;
 
         Ok(images)
     }
 
+    /// Destroy any cached image views created for the swapchain and clear the cache.
     pub fn destroy_image_views(&self) -> crate::Result<()> {
         let mut image_views = self.image_views.lock().unwrap();
 
@@ -502,6 +511,8 @@ impl Swapchain {
         Ok(())
     }
 
+    /// Create (or return cached) image views for each swapchain image.
+    /// The created views are cached for later destruction via `destroy_image_views`.
     pub fn get_image_views(&self) -> crate::Result<Vec<vk::ImageView>> {
         let images = self.get_images()?;
 
@@ -547,6 +558,8 @@ impl Swapchain {
         Ok(views)
     }
 
+    /// Destroy the swapchain handle. Image views should be destroyed separately
+    /// (e.g. via `Swapchain::destroy_image_views`) before destroying the swapchain.
     pub fn destroy(&self) {
         unsafe {
             self.device
