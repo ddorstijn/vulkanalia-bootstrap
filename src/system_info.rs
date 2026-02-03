@@ -36,7 +36,7 @@ impl SystemInfo {
     pub fn get_system_info() -> crate::Result<Self> {
         #[cfg(feature = "enable_tracing")]
         tracing::trace!("Loading entry...");
-        let loader = unsafe { LibloadingLoader::new(LIBRARY) }?;
+        let loader = unsafe { LibloadingLoader::new(LIBRARY) }.unwrap();
         let entry = unsafe { Entry::new(loader).unwrap() };
         #[cfg(feature = "enable_tracing")]
         tracing::trace!("Entry loaded.");

@@ -12,7 +12,7 @@ pub enum Error {
     #[error("Swapchain error: {0}")]
     Swapchain(#[from] SwapchainError),
     #[error("Vulkanalia loading error: {0}")]
-    AshLoading(#[from] libloading::Error),
+    VulkanaliaLoading(#[from] libloading::Error),
     #[error("Vulkan error: {0}")]
     Vulkan(#[from] vulkanalia::vk::Result),
     #[error("Vulkan error: {0}")]
