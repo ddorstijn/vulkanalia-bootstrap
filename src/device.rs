@@ -303,6 +303,22 @@ impl PhysicalDevice {
             false
         }
     }
+
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
+    pub fn api_version(&self) -> u32 {
+        self.properties.api_version
+    }
+
+    pub fn api_version_string(&self) -> String {
+        let variant = vk::api_version_variant(self.properties.api_version);
+        let major = vk::api_version_major(self.properties.api_version);
+        let minor = vk::api_version_minor(self.properties.api_version);
+        let patch = vk::api_version_patch(self.properties.api_version);
+        format!("{variant}.{major}.{minor}.{patch}")
+    }
 }
 
 // TODO: proper transmute via ash
