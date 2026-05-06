@@ -318,11 +318,10 @@ impl PhysicalDevice {
     }
 
     pub fn api_version_string(&self) -> String {
-        let variant = vk::api_version_variant(self.properties.api_version);
-        let major = vk::api_version_major(self.properties.api_version);
-        let minor = vk::api_version_minor(self.properties.api_version);
-        let patch = vk::api_version_patch(self.properties.api_version);
-        format!("{variant}.{major}.{minor}.{patch}")
+        let major = vk::version_major(self.properties.api_version);
+        let minor = vk::version_minor(self.properties.api_version);
+        let patch = vk::version_patch(self.properties.api_version);
+        format!("{major}.{minor}.{patch}")
     }
 }
 
