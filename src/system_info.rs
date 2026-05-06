@@ -63,7 +63,7 @@ impl SystemInfo {
 
         for layer in &available_layers {
             let layer_extensions = unsafe {
-                entry.enumerate_instance_extension_properties(Some(layer.layer_name.as_bytes()))
+                entry.enumerate_instance_extension_properties(Some(layer.layer_name.as_cstr()))
             }?;
 
             available_extensions.extend_from_slice(&layer_extensions);

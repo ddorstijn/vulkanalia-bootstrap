@@ -1,6 +1,6 @@
 [package]
 name = "vulkanalia-bootstrap"
-version = "0.1.6"
+version = "0.1.7"
 edition = "2024"
 description = "A utility library that jump starts initialization of Vulkan via Vulkanalia"
 documentation = "https://docs.rs/vulkanalia_bootstrap/latest/vulkanalia_bootstrap"
@@ -25,7 +25,7 @@ keywords = ["vulkan", "vulkanalia", "bindings", "gamedev", "rendering"]
 thiserror = "2.0.18"
 raw-window-handle = { version = "0.6.2" }
 tracing = { version = "0.1.44", optional = true }
-vulkanalia = { version = "0.34.0", features = ["libloading", "window"] }
+vulkanalia = { version = "0.35.0", features = ["libloading", "window"] }
 libloading = "0.9.0"
 
 [dev-dependencies]
