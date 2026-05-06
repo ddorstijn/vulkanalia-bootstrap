@@ -1,6 +1,6 @@
 # `Vulkanalia Bootstrap`&emsp; [![Latest Version]][crates.io] [![Rustc Version 1.36+]][rustc] ![license]
 
-[Latest Version]: https://img.shields.io/crates/v/ash_bootstrap.svg
+[Latest Version]: https://img.shields.io/crates/v/vulkanalia_bootstrap.svg
 [crates.io]: https://crates.io/crates/vulkanalia_bootstrap
 [Rustc Version 1.36+]: https://img.shields.io/badge/rustc-1.85+-lightgray.svg
 [rustc]: https://blog.rust-lang.org/2025/02/20/Rust-1.85.0/
@@ -12,7 +12,7 @@
 
 ```toml
 [dependencies]
-vulkanalia_bootstrap = "0.1.5"
+vulkanalia_bootstrap = "0.1.7"
 ```
 
 ## Features
